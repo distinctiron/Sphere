@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sphere Design Direction: Academic Minimalist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&display=swap"
+        rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Merriweather', 'serif'],
+                    },
+                    colors: {
+                        slate: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            300: '#cbd5e1',
+                            400: '#94a3b8',
+                            500: '#64748b',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
+                        },
+                        indigo: {
+                            600: '#4f46e5',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        .reader-text {
+            font-family: 'Merriweather', serif;
+            line-height: 1.8;
+        }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        /* Resizer Handle Styles */
+        .resizer {
+            width: 4px;
+            cursor: col-resize;
+            background-color: transparent;
+            transition: background-color 0.2s;
+            z-index: 50;
+        }
+
+        .resizer:hover,
+        .resizer.resizing {
+            background-color: #4f46e5;
+            /* Indigo-600 */
+        }
+    </style>
+</head>
+
+<body class="bg-slate-50 text-slate-900 antialiased h-screen flex overflow-hidden" id="app-body">
+
+    <!-- Sidebar (Navigation) -->
+    <aside id="app-sidebar"
+        class="w-64 border-r border-slate-200 bg-white flex-shrink-0 flex flex-col justify-between p-4 transition-all duration-300 overflow-hidden whitespace-nowrap">
+        <div>
+            <div class="flex items-center gap-2 mb-8 px-2">
+                <div class="w-6 h-6 bg-slate-900 rounded-full flex-shrink-0"></div>
+                <span class="font-semibold text-lg tracking-tight opacity-100 transition-opacity duration-200"
+                    id="sidebar-logo-text">Sphere</span>
+            </div>
+
+            <nav class="space-y-1">
+                <a href="#" onclick="switchView('dashboard')"
+                    class="flex items-center gap-3 px-2 py-2 text-sm font-medium text-slate-900 bg-slate-100 rounded-md overflow-hidden">
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z">
+                        </path>
+                    </svg>
+                    <span class="opacity-100 transition-opacity duration-200 sidebar-text">Impact Dashboard</span>
+                </a>
+                <a href="#"
+                    class="flex items-center gap-3 px-2 py-2 text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-50 rounded-md overflow-hidden">
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253">
+                        </path>
+                    </svg>
+                    <span class="opacity-100 transition-opacity duration-200 sidebar-text">My Reading List</span>
+                </a>
+            </nav>
+        </div>
+
+        <div class="px-2">
+            <button onclick="toggleTheme()"
+                class="flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-900 overflow-hidden">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
+                    </path>
+                </svg>
+                <span class="opacity-100 transition-opacity duration-200 sidebar-text">Toggle Dark Mode</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Overlay Sidebar Toggle (Visible when sidebar is collapsed) -->
+    <button id="sidebar-toggle" onclick="toggleSidebarOverlay()"
+        class="fixed top-4 left-4 z-50 p-2 bg-white border border-slate-200 rounded-md shadow-md text-slate-500 hover:text-slate-900 hidden">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+        </svg>
+    </button>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex overflow-hidden relative" id="main-content">
+
+        <!-- VIEW 1: DASHBOARD (Full Width) -->
+        <div id="dashboard-view" class="w-full h-full overflow-y-auto p-8 max-w-6xl mx-auto">
+            <header class="mb-8 flex justify-between items-end">
+                <div>
+                    <h1 class="text-2xl font-semibold text-slate-900 mb-1">Impact Dashboard</h1>
+                    <p class="text-slate-500 text-sm">Your daily feed of high-novelty research.</p>
+                </div>
+                <div class="text-sm text-slate-400">
+                    Updated 2 hours ago
+                </div>
+            </header>
+
+            <!-- 1. NOVELTY CAROUSEL (Top 5 - Material Design 3 Style) -->
+            <section class="mb-12">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Top 5 Novelty Scores</h2>
+
+                <!-- Carousel Container -->
+                <div class="relative overflow-hidden py-8">
+                    <div id="carousel-track" class="flex items-center gap-6 transition-transform duration-700 ease-out">
+
+                        <!-- Carousel Item 1 -->
+                        <div class="carousel-item flex-shrink-0 w-[500px] transition-all duration-700" data-index="0">
+                            <div class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-8 text-white shadow-2xl cursor-pointer transform transition-all duration-700"
+                                onclick="switchView('reader')">
+                                <div class="flex justify-between items-start mb-6">
+                                    <span
+                                        class="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-semibold">Novelty:
+                                        9.8</span>
+                                    <span class="text-indigo-200 text-xs font-medium">#1 Trending</span>
+                                </div>
+                                <h3 class="font-bold text-2xl mb-3 leading-tight">Attention Is All You Need</h3>
+                                <p class="text-indigo-100 text-sm mb-4 leading-relaxed">
+                                    Proposes the Transformer, a model architecture eschewing recurrence and relying
+                                    entirely on an attention mechanism to draw global dependencies.
+                                </p>
+                                <div class="pt-4 border-t border-white/20">
+                                    <p class="text-xs text-indigo-200 font-medium mb-2">Why Novel?</p>
+                                    <p class="text-sm text-white/90 leading-relaxed">
+                                        Completely eliminates recurrent and convolutional layers, achieving
+                                        state-of-the-art translation quality with significantly reduced training time
+                                        through parallelization.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carousel Item 2 -->
+                        <div class="carousel-item flex-shrink-0 w-[500px] transition-all duration-700" data-index="1">
+                            <div
+                                class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-8 text-white shadow-2xl cursor-pointer transform transition-all duration-700">
+                                <div class="flex justify-between items-start mb-6">
+                                    <span
+                                        class="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-semibold">Novelty:
+                                        9.2</span>
+                                    <span class="text-indigo-200 text-xs font-medium">#2</span>
+                                </div>
+                                <h3 class="font-bold text-2xl mb-3 leading-tight">Deep Residual Learning for Image
+                                    Recognition</h3>
+                                <p class="text-indigo-100 text-sm mb-4 leading-relaxed">
+                                    Presents a residual learning framework to ease the training of networks that are
+                                    substantially deeper than those used previously.
+                                </p>
+                                <div class="pt-4 border-t border-white/20">
+                                    <p class="text-xs text-indigo-200 font-medium mb-2">Why Novel?</p>
+                                    <p class="text-sm text-white/90 leading-relaxed">
+                                        Introduces skip connections that enable training of networks with 100+ layers,
+                                        solving the degradation problem and winning ImageNet 2015.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carousel Item 3 -->
+                        <div class="carousel-item flex-shrink-0 w-[500px] transition-all duration-700" data-index="2">
+                            <div
+                                class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-8 text-white shadow-2xl cursor-pointer transform transition-all duration-700">
+                                <div class="flex justify-between items-start mb-6">
+                                    <span
+                                        class="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-semibold">Novelty:
+                                        8.9</span>
+                                    <span class="text-indigo-200 text-xs font-medium">#3</span>
+                                </div>
+                                <h3 class="font-bold text-2xl mb-3 leading-tight">BERT: Pre-training of Deep
+                                    Bidirectional Transformers</h3>
+                                <p class="text-indigo-100 text-sm mb-4 leading-relaxed">
+                                    Introduces a new language representation model that obtains state-of-the-art results
+                                    on eleven natural language processing tasks.
+                                </p>
+                                <div class="pt-4 border-t border-white/20">
+                                    <p class="text-xs text-indigo-200 font-medium mb-2">Why Novel?</p>
+                                    <p class="text-sm text-white/90 leading-relaxed">
+                                        First deeply bidirectional pre-trained language model using masked language
+                                        modeling, revolutionizing transfer learning in NLP.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carousel Item 4 -->
+                        <div class="carousel-item flex-shrink-0 w-[500px] transition-all duration-700" data-index="3">
+                            <div
+                                class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-8 text-white shadow-2xl cursor-pointer transform transition-all duration-700">
+                                <div class="flex justify-between items-start mb-6">
+                                    <span
+                                        class="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-semibold">Novelty:
+                                        8.5</span>
+                                    <span class="text-indigo-200 text-xs font-medium">#4</span>
+                                </div>
+                                <h3 class="font-bold text-2xl mb-3 leading-tight">GPT-3: Language Models are Few-Shot
+                                    Learners</h3>
+                                <p class="text-indigo-100 text-sm mb-4 leading-relaxed">
+                                    Demonstrates that scaling up language models greatly improves task-agnostic,
+                                    few-shot performance, sometimes even reaching competitiveness with prior
+                                    state-of-the-art fine-tuning approaches.
+                                </p>
+                                <div class="pt-4 border-t border-white/20">
+                                    <p class="text-xs text-indigo-200 font-medium mb-2">Why Novel?</p>
+                                    <p class="text-sm text-white/90 leading-relaxed">
+                                        Achieves strong performance on many NLP tasks with minimal task-specific data,
+                                        demonstrating emergent few-shot learning at 175B parameters.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carousel Item 5 -->
+                        <div class="carousel-item flex-shrink-0 w-[500px] transition-all duration-700" data-index="4">
+                            <div
+                                class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-8 text-white shadow-2xl cursor-pointer transform transition-all duration-700">
+                                <div class="flex justify-between items-start mb-6">
+                                    <span
+                                        class="bg-white/20 backdrop-blur-sm px-3 py-1.5 rounded-full text-sm font-semibold">Novelty:
+                                        8.3</span>
+                                    <span class="text-indigo-200 text-xs font-medium">#5</span>
+                                </div>
+                                <h3 class="font-bold text-2xl mb-3 leading-tight">Generative Adversarial Networks</h3>
+                                <p class="text-indigo-100 text-sm mb-4 leading-relaxed">
+                                    Proposes a new framework for estimating generative models via an adversarial
+                                    process, in which we simultaneously train two models.
+                                </p>
+                                <div class="pt-4 border-t border-white/20">
+                                    <p class="text-xs text-indigo-200 font-medium mb-2">Why Novel?</p>
+                                    <p class="text-sm text-white/90 leading-relaxed">
+                                        Introduces game-theoretic approach to generative modeling, enabling realistic
+                                        image synthesis and spawning entire research field.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Carousel Indicators -->
+                    <div class="flex justify-center gap-2 mt-6">
+                        <button
+                            class="carousel-indicator w-2 h-2 rounded-full bg-indigo-600 transition-all duration-300"
+                            data-index="0"></button>
+                        <button class="carousel-indicator w-2 h-2 rounded-full bg-slate-300 transition-all duration-300"
+                            data-index="1"></button>
+                        <button class="carousel-indicator w-2 h-2 rounded-full bg-slate-300 transition-all duration-300"
+                            data-index="2"></button>
+                        <button class="carousel-indicator w-2 h-2 rounded-full bg-slate-300 transition-all duration-300"
+                            data-index="3"></button>
+                        <button class="carousel-indicator w-2 h-2 rounded-full bg-slate-300 transition-all duration-300"
+                            data-index="4"></button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. RANKED LIST (Rectangular Impact Cards) -->
+            <section>
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Latest Arrivals</h2>
+
+                <div class="space-y-3">
+
+                    <!-- List Item 1 -->
+                    <div class="bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-6 hover:border-indigo-300 hover:shadow-sm transition-all cursor-pointer group"
+                        onclick="switchView('reader')">
+                        <!-- Score -->
+                        <div class="flex-shrink-0 w-16 text-center">
+                            <div class="text-xl font-bold text-indigo-600">8.4</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-medium">Novelty</div>
+                        </div>
+
+                        <!-- Content -->
+                        <div class="flex-1 min-w-0">
+                            <h3
+                                class="text-base font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">
+                                Visualizing Data using t-SNE</h3>
+                            <div class="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <span class="font-medium text-slate-700">Van der Maaten et al.</span>
+                                <span>•</span>
+                                <span>JMLR 2008</span>
+                                <span>•</span>
+                                <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">Visualization</span>
+                            </div>
+                        </div>
+
+                        <!-- Action -->
+                        <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-2">
+                            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                                </path>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- List Item 2 -->
+                    <div
+                        class="bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-6 hover:border-indigo-300 hover:shadow-sm transition-all cursor-pointer group">
+                        <div class="flex-shrink-0 w-16 text-center">
+                            <div class="text-xl font-bold text-slate-700">7.8</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-medium">Novelty</div>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3
+                                class="text-base font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">
+                                Adam: A Method for Stochastic Optimization</h3>
+                            <div class="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <span class="font-medium text-slate-700">Kingma & Ba</span>
+                                <span>•</span>
+                                <span>ICLR 2015</span>
+                                <span>•</span>
+                                <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">Optimization</span>
+                            </div>
+                        </div>
+                        <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-2">
+                            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                                </path>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <!-- List Item 3 -->
+                    <div
+                        class="bg-white border border-slate-200 rounded-lg p-4 flex items-center gap-6 hover:border-indigo-300 hover:shadow-sm transition-all cursor-pointer group">
+                        <div class="flex-shrink-0 w-16 text-center">
+                            <div class="text-xl font-bold text-slate-700">7.2</div>
+                            <div class="text-[10px] text-slate-400 uppercase font-medium">Novelty</div>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <h3
+                                class="text-base font-semibold text-slate-900 truncate group-hover:text-indigo-600 transition-colors">
+                                Dropout: A Simple Way to Prevent Neural Networks from Overfitting</h3>
+                            <div class="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                                <span class="font-medium text-slate-700">Srivastava et al.</span>
+                                <span>•</span>
+                                <span>JMLR 2014</span>
+                                <span>•</span>
+                                <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">Regularization</span>
+                            </div>
+                        </div>
+                        <div class="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity pr-2">
+                            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7">
+                                </path>
+                            </svg>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+        </div>
+
+        <!-- VIEW 2: READER (Split Screen Layout) -->
+        <div id="reader-view" class="hidden w-full h-full flex">
+
+            <!-- Paper Content (Flexible Width) -->
+            <div class="flex-1 overflow-y-auto bg-white border-r border-slate-200" id="paper-container">
+                <div class="p-8 md:p-12 lg:p-16 max-w-3xl mx-auto">
+                    <div class="flex justify-between items-center mb-8">
+                        <button onclick="switchView('dashboard')"
+                            class="text-sm text-slate-400 hover:text-slate-900 flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                            </svg>
+                            Back to Dashboard
+                        </button>
+                    </div>
+
+                    <h1 class="text-3xl md:text-4xl font-bold text-slate-900 mb-4 tracking-tight">Attention Is All You
+                        Need</h1>
+                    <div class="flex gap-4 text-sm text-slate-500 mb-12 border-b border-slate-100 pb-8">
+                        <span>Ashish Vaswani</span>
+                        <span>Noam Shazeer</span>
+                        <span>Niki Parmar</span>
+                    </div>
+
+                    <div class="reader-text text-lg text-slate-800 space-y-6">
+                        <p>
+                            The dominant sequence transduction models are based on complex recurrent or convolutional
+                            neural networks that include an encoder and a decoder. The best performing models also
+                            connect the encoder and decoder through an attention mechanism.
+                        </p>
+                        <p>
+                            We propose a new simple network architecture, the <span
+                                class="bg-indigo-50 text-indigo-900 px-1 rounded cursor-pointer border-b border-indigo-200 hover:bg-indigo-100 transition-colors relative group"
+                                onclick="togglePopover(this)">Transformer
+                                <!-- Popover -->
+                                <div
+                                    class="hidden absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-slate-900 text-white text-xs p-3 rounded shadow-lg z-10 pointer-events-none group-hover:block">
+                                    A type of neural network architecture that relies entirely on self-attention
+                                    mechanisms, discarding recurrence and convolutions.
+                                    <svg class="absolute top-full left-1/2 -translate-x-1/2 w-2 h-2 text-slate-900 fill-current"
+                                        viewBox="0 0 255 255">
+                                        <polygon points="0,0 127.5,127.5 255,0" />
+                                    </svg>
+                                </div>
+                            </span>, based solely on attention mechanisms, dispensing with recurrence and convolutions
+                            entirely.
+                        </p>
+                        <p>
+                            Experiments on two machine translation tasks show these models to be superior in quality
+                            while being more parallelizable and requiring significantly less time to train.
+                        </p>
+                        <p id="highlight-target" class="cursor-text selection:bg-indigo-100 selection:text-indigo-900">
+                            In this work we present the Transformer, a model architecture eschewing recurrence and
+                            instead relying entirely on an attention mechanism to draw global dependencies between input
+                            and output.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resizer Handle -->
+            <!-- Visible only when chat is open -->
+            <div id="resizer"
+                class="resizer hidden flex-shrink-0 bg-slate-200 hover:bg-indigo-500 transition-colors relative">
+                <!-- Chevron Toggle (Centered on Resizer) -->
+                <!-- Points RIGHT (>) to indicate closing -->
+                <button onclick="toggleChat()"
+                    class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-12 bg-white border border-slate-200 rounded-full flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-sm z-50 focus:outline-none group cursor-pointer">
+                    <svg id="chat-chevron" class="w-4 h-4 transition-transform duration-300" fill="none"
+                        stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Chat Pane (Variable Width) -->
+            <!-- Initially hidden (width 0) -->
+            <div id="chat-pane"
+                class="w-0 bg-slate-50 flex flex-col overflow-hidden transition-all duration-300 ease-in-out"
+                style="width: 0px;">
+
+                <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-white flex-shrink-0">
+                    <h3 class="font-semibold text-sm text-slate-900">Chat with Paper</h3>
+                    <div class="flex gap-2">
+                        <button onclick="toggleChat()" class="text-slate-400 hover:text-slate-900">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex-1 p-6 space-y-6 overflow-y-auto min-w-[300px]">
+                    <!-- User Query -->
+                    <div class="text-sm text-slate-400 font-medium pl-3 border-l-2 border-slate-200">
+                        Can you explain the mathematical definition of Attention?
+                    </div>
+
+                    <!-- AI Response (Article Style) -->
+                    <div class="prose prose-slate prose-sm max-w-none">
+                        <h4 class="font-serif text-slate-900 font-bold text-lg mb-3">Scaled Dot-Product Attention</h4>
+
+                        <p class="leading-relaxed text-slate-700 mb-4">
+                            The Transformer uses a specific attention mechanism called "Scaled Dot-Product Attention".
+                            The input consists of queries and keys of dimension <span
+                                class="font-mono text-xs">d_k</span>, and values of dimension <span
+                                class="font-mono text-xs">d_v</span>.
+                        </p>
+
+                        <!-- Mock Equation Block -->
+                        <div class="bg-white p-4 rounded border border-slate-200 mb-5 flex justify-center">
+                            <span class="font-serif italic text-lg text-slate-800">
+                                Attention(Q, K, V) = softmax(
+                                <span class="inline-block text-center align-middle mx-1">
+                                    <span class="block border-b border-slate-800">QK<sup>T</sup></span>
+                                    <span class="block text-sm">√d<sub>k</sub></span>
+                                </span>
+                                )V
+                            </span>
+                        </div>
+
+                        <p class="leading-relaxed text-slate-700 mb-4">
+                            We compute the dot products of the query with all keys, divide each by <span
+                                class="font-mono text-xs">√d_k</span>, and apply a softmax function to obtain the
+                            weights on the values.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Input Area (Expanded Height) -->
+                <div class="bg-white border-t border-slate-200 flex-shrink-0 min-w-[300px] flex flex-col"
+                    style="height: 33vh;">
+                    <div class="flex-1 p-4 relative">
+                        <textarea placeholder="Ask a complex question about this paper..."
+                            class="w-full h-full p-4 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none leading-relaxed"></textarea>
+                        <button
+                            class="absolute right-6 bottom-6 p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 shadow-sm transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="px-4 pb-2 text-xs text-slate-400 flex justify-between">
+                        <span>Markdown supported</span>
+                        <span>Enter to send</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Collapsed Chat Toggle (Visible when chat is closed) -->
+            <!-- Points LEFT (<) to indicate opening -->
+            <button id="collapsed-chat-toggle" onclick="toggleChat()"
+                class="absolute right-0 top-1/2 -translate-y-1/2 w-8 h-16 bg-white border border-slate-200 border-r-0 rounded-l-md flex items-center justify-center text-slate-400 hover:text-indigo-600 shadow-md z-40 focus:outline-none group">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                </svg>
+            </button>
+
+        </div>
+
+    </main>
+
+    <script>
+        let isChatOpen = false;
+        let isResizing = false;
+        const appBody = document.getElementById('app-body');
+        const sidebar = document.getElementById('app-sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const chatPane = document.getElementById('chat-pane');
+        const resizer = document.getElementById('resizer');
+        const collapsedToggle = document.getElementById('collapsed-chat-toggle');
+        const chatChevron = document.getElementById('chat-chevron');
+
+        function switchView(viewName) {
+            const dashboard = document.getElementById('dashboard-view');
+            const reader = document.getElementById('reader-view');
+
+            if (viewName === 'reader') {
+                dashboard.classList.add('hidden');
+                reader.classList.remove('hidden');
+            } else {
+                reader.classList.add('hidden');
+                dashboard.classList.remove('hidden');
+                // Ensure chat is closed when going back to dashboard? Or keep state?
+                // For now, let's keep state but sidebar should be visible on dashboard
+                if (isChatOpen) toggleChat(); // Close chat to restore sidebar
+            }
+        }
+
+        function toggleChat() {
+            isChatOpen = !isChatOpen;
+
+            if (isChatOpen) {
+                // OPEN CHAT
+                // 1. Collapse Sidebar
+                sidebar.style.width = '0px';
+                sidebar.style.padding = '0px';
+                sidebarToggle.classList.remove('hidden');
+
+                // 2. Open Chat Pane (Default 50%)
+                chatPane.style.width = '50%';
+                resizer.classList.remove('hidden');
+                collapsedToggle.classList.add('hidden');
+
+                // 3. Chevron inside resizer is already pointing RIGHT (>) by default SVG in HTML
+                // No rotation needed if we set the SVG correctly in HTML
+
+            } else {
+                // CLOSE CHAT
+                // 1. Restore Sidebar
+                sidebar.style.width = '16rem'; // w-64
+                sidebar.style.padding = '1rem'; // p-4
+                sidebarToggle.classList.add('hidden');
+
+                // 2. Close Chat Pane
+                chatPane.style.width = '0px';
+                resizer.classList.add('hidden');
+                collapsedToggle.classList.remove('hidden');
+            }
+        }
+
+        function toggleSidebarOverlay() {
+            // Logic for overlay sidebar would go here
+            // For this mockup, let's just restore the sidebar temporarily or toggle it
+            // Simple toggle for demo:
+            if (sidebar.style.width === '0px') {
+                sidebar.style.width = '16rem';
+                sidebar.style.padding = '1rem';
+                sidebar.style.position = 'absolute'; // Make it overlay
+                sidebar.style.zIndex = '60';
+                sidebar.style.height = '100%';
+            } else {
+                sidebar.style.width = '0px';
+                sidebar.style.padding = '0px';
+            }
+        }
+
+        // Resizing Logic
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+            // Disable transition during resize for performance
+            chatPane.style.transition = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+
+            // Calculate new width for chat pane
+            // Width = Total Width - Mouse X
+            const newWidth = window.innerWidth - e.clientX;
+
+            // Min/Max constraints
+            if (newWidth > 300 && newWidth < window.innerWidth - 300) {
+                chatPane.style.width = `${newWidth}px`;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isResizing) {
+                isResizing = false;
+                resizer.classList.remove('resizing');
+                document.body.style.cursor = 'default';
+                // Re-enable transition
+                chatPane.style.transition = 'all 0.3s ease-in-out';
+            }
+        });
+
+        // Carousel Logic (Material Design 3 Style)
+        let currentCarouselIndex = 0;
+        const carouselItems = document.querySelectorAll('.carousel-item');
+        const carouselTrack = document.getElementById('carousel-track');
+        const carouselIndicators = document.querySelectorAll('.carousel-indicator');
+        const totalItems = carouselItems.length;
+        const itemWidth = 500; // Width of each card
+        const itemGap = 24; // Reduced gap between items (gap-6 = 1.5rem = 24px)
+
+        function updateCarousel() {
+            if (!carouselTrack || carouselItems.length === 0) {
+                return;
+            }
+
+            // Calculate center position based on parent container
+            const container = carouselTrack.parentElement;
+            const containerWidth = container.offsetWidth;
+
+            // Center the current item
+            // We want the center of the focused card to align with the center of the container
+            const centerOffset = (containerWidth / 2) - (itemWidth / 2);
+
+            // Calculate how far to shift based on current index
+            const shiftAmount = currentCarouselIndex * (itemWidth + itemGap);
+
+            // Final transform: start at center, then shift left by the appropriate amount
+            const translateX = centerOffset - shiftAmount;
+
+            carouselTrack.style.transform = `translateX(${translateX}px)`;
+
+            // Update item states based on distance from center
+            carouselItems.forEach((item, index) => {
+                const distance = Math.abs(index - currentCarouselIndex);
+                const card = item.querySelector('div');
+
+                if (distance === 0) {
+                    // Center item (focused)
+                    item.style.opacity = '1';
+                    item.style.transform = 'scale(1)';
+                    if (card) card.style.filter = 'brightness(1)';
+                } else if (distance === 1) {
+                    // Adjacent items
+                    item.style.opacity = '0.6';
+                    item.style.transform = 'scale(0.85)';
+                    if (card) card.style.filter = 'brightness(0.7)';
+                } else {
+                    // Far items
+                    item.style.opacity = '0.3';
+                    item.style.transform = 'scale(0.7)';
+                    if (card) card.style.filter = 'brightness(0.5)';
+                }
+            });
+
+            // Update indicators (with wrapping for infinite loop)
+            carouselIndicators.forEach((indicator, index) => {
+                const actualIndex = currentCarouselIndex % totalItems;
+                if (index === actualIndex) {
+                    indicator.classList.remove('bg-slate-300');
+                    indicator.classList.add('bg-indigo-600', 'w-8');
+                } else {
+                    indicator.classList.remove('bg-indigo-600', 'w-8');
+                    indicator.classList.add('bg-slate-300');
+                }
+            });
+        }
+
+        function nextCarouselItem() {
+            currentCarouselIndex = (currentCarouselIndex + 1) % totalItems;
+            updateCarousel();
+        }
+
+        // Auto-rotate carousel every 4 seconds
+        let carouselInterval = setInterval(nextCarouselItem, 4000);
+
+        // Click indicators to navigate
+        carouselIndicators.forEach((indicator, index) => {
+            indicator.addEventListener('click', () => {
+                currentCarouselIndex = index;
+                updateCarousel();
+                // Reset auto-rotation timer
+                clearInterval(carouselInterval);
+                carouselInterval = setInterval(nextCarouselItem, 4000);
+            });
+        });
+
+        // Initialize carousel on load and on window resize
+        window.addEventListener('load', () => {
+            updateCarousel();
+        });
+        window.addEventListener('resize', () => {
+            updateCarousel();
+        });
+
+        // Initial call
+        updateCarousel();
+    </script>
+</body>
+
+</html>
+```

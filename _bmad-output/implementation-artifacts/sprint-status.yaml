@@ -1,0 +1,71 @@
+# Sprint Status Tracking
+# Generated: 2026-01-04
+# Project: Sphere
+# Tracking System: file-system
+# Story Location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Mark epic as 'in-progress' when starting work on its first story
+# - SM typically creates next story ONLY after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then Dev runs code-review (fresh context, ideally different LLM)
+
+generated: 2026-01-04
+project: Sphere
+project_key: sphere
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: done
+  1-1-project-foundation-setup: done
+  1-2-user-registration: done
+  1-3-user-login: done
+  1-4-password-reset: done
+  1-5-view-account-profile: done
+  epic-1-retrospective: optional
+
+  epic-2: done
+  2-1-papers-database-schema: done
+  2-2-arxiv-api-service-paper-fetching-on-login: done
+  2-3-novelty-scoring-service: done
+  2-4-impact-dashboard-page-with-papers-display: done
+  2-5-impact-card-component: done
+  2-6-dashboard-filtering-by-research-fields: done
+  2-7-add-to-list-action-from-impact-card: done
+  2-8-dismiss-paper-from-dashboard: done
+  epic-2-retrospective: optional
+
+  epic-3: done
+  3-1-paper-reader-route-html-rendering: done
+  3-2-pdf-fallback-view: done
+  3-3-text-selection-context-menu-for-intellisense: done
+  3-4-intellisense-explanation-service-popover-display: done
+  3-5-interactive-deep-dive-panel-chat-with-paper: done
+  3-6-paper-reading-state-tracking: done
+  epic-3-retrospective: optional
+
+  epic-4: done
+  4-1-dashboard-library-section-drag-and-drop-management: done
+  4-2-mark-paper-as-read: done
+  4-3-remove-paper-from-library: done
+  epic-4-retrospective: optional
+

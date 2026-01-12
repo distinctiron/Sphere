@@ -1,0 +1,115 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// NextAuth.js required models
+model User {
+  id                 String           @id @default(cuid())
+  name               String?
+  email              String           @unique
+  emailVerified      DateTime?
+  image              String?
+  password           String? // For credentials provider
+  accounts           Account[]
+  sessions           Session[]
+  lastFetchTimestamp DateTime? // Last time user fetched papers from arXiv
+  paperStates        UserPaperState[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// Papers from arXiv
+model Paper {
+  id              String           @id @default(cuid())
+  arxivId         String           @unique @map("arxiv_id")
+  title           String
+  authors         Json // Array of author objects with name field
+  abstract        String
+  publicationDate DateTime         @map("publication_date")
+  updatedDate     DateTime         @map("updated_date")
+  categories      Json // Array of category strings
+  pdfUrl          String           @map("pdf_url")
+  htmlUrl         String           @map("html_url")
+  noveltyScore    Float?           @map("novelty_score")
+  noveltySummary  String?          @map("novelty_summary")
+  userStates      UserPaperState[]
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  @@index([arxivId])
+  @@map("papers")
+}
+
+// User-Paper state relationship
+model UserPaperState {
+  id           String      @id @default(cuid())
+  userId       String      @map("user_id")
+  paperId      String      @map("paper_id")
+  status       PaperStatus @default(NEW)
+  inLibrary    Boolean     @default(false) @map("in_library")
+  displayOrder Int?        @map("display_order")
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paper        Paper       @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@unique([userId, paperId])
+  @@index([userId])
+  @@index([paperId])
+  @@map("user_paper_states")
+}
+
+enum PaperStatus {
+  NEW
+  DISMISSED
+  READ
+  BEING_PROCESSED
+
+  @@map("paper_status")
+}
