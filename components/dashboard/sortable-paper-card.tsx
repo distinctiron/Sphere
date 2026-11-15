@@ -3,7 +3,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { PaperListCard } from "./paper-list-card";
-import { GripVertical } from "lucide-react";
+import { DragHandleMark } from "./drag-handle-mark";
 
 interface SortablePaperCardProps {
   paper: {
@@ -59,9 +59,10 @@ export function SortablePaperCard({
       <div
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full pr-2 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        className="absolute left-0 top-1/2 z-10 -translate-x-full -translate-y-1/2 cursor-grab pr-1 text-pencil opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 active:cursor-grabbing group-hover:opacity-100"
+        aria-label="Drag to move"
       >
-        <GripVertical className="w-4 h-4 text-slate-400" />
+        <DragHandleMark />
       </div>
       <PaperListCard
         paper={{

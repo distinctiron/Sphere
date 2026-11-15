@@ -1,13 +1,10 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { SketchCard } from "@/components/sketch";
+import { AppHeader } from "@/components/sketch/app-header";
+import { PageTitle } from "@/components/payment/sketch-marks";
+import { PaymentPage } from "@/components/payment/payment-page";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -48,45 +45,37 @@ export default async function ProfilePage() {
   });
 
   return (
-    <div className="container mx-auto p-8 max-w-2xl">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-2">Profile</h1>
-        <p className="text-muted-foreground">View your account information</p>
-      </div>
+    <div className="mx-auto flex max-w-[1240px] flex-col gap-8 px-6 pb-16 pt-6">
+      <AppHeader />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Account Information</CardTitle>
-          <CardDescription>
-            Your account details and settings
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Email Address
-            </label>
-            <p className="text-base font-medium mt-1">{user.email}</p>
-          </div>
+      <PageTitle title="Account" subtitle="Manage your account and payment settings" />
 
-          {user.name && (
+      <PaymentPage
+        accountCard={
+        <SketchCard seed="account-info" w={590} h={330} hover wedge as="section" aria-labelledby="acct-h" wrapClassName="h-full" className="h-full px-7 pb-7 pt-[26px]">
+          <h2 id="acct-h" className="m-0 font-hand text-[34px] font-bold leading-none">Account Information</h2>
+          <p className="sk-muted mb-5 mt-1 text-sm">Your account details and settings</p>
+          <dl className="m-0 grid gap-3.5">
             <div>
-              <label className="text-sm font-medium text-muted-foreground">
-                Name
-              </label>
-              <p className="text-base font-medium mt-1">{user.name}</p>
+              <dt className="sk-muted font-hand text-xl font-bold leading-none">Email Address</dt>
+              <dd className="mt-0.5 text-base">{user.email}</dd>
             </div>
-          )}
 
-          <div>
-            <label className="text-sm font-medium text-muted-foreground">
-              Account Created
-            </label>
-            <p className="text-base font-medium mt-1">{createdAt}</p>
-          </div>
-        </CardContent>
-      </Card>
+            {user.name && (
+              <div>
+                <dt className="sk-muted font-hand text-xl font-bold leading-none">Name</dt>
+                <dd className="mt-0.5 text-base">{user.name}</dd>
+              </div>
+            )}
+
+            <div>
+              <dt className="sk-muted font-hand text-xl font-bold leading-none">Account Created</dt>
+              <dd className="mt-0.5 text-base">{createdAt}</dd>
+            </div>
+          </dl>
+        </SketchCard>
+        }
+      />
     </div>
   );
 }
-

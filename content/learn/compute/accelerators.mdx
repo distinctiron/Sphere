@@ -1,0 +1,159 @@
+---
+id: accelerators
+title: Accelerators, tensor cores and low precision
+summary: How AI chips specialise for matrix multiplication. Tensor cores and systolic arrays do a whole tile per instruction and pass data between neighbours; fewer bits per number double both effective bandwidth and arithmetic. Custom chips like TPUs trade flexibility and software for efficiency.
+minutes: 12
+model: feeding-the-math
+buildsOn: [gpu, memory-wall]
+related: [serving-at-scale, distributed-training, semiconductors, hyperscalers, matrices]
+keywords: ["TPU", "tensor processing unit", "tensor cores", "Trainium", "custom silicon", "AI accelerator", "ASIC", "FP8", "FP4", "systolic array", "CUDA"]
+quiz:
+  - question: A 70B model generates text for a single user, memory-bound. Its weights are converted from BF16 to FP8, with no other change. Roughly what happens to tokens per second?
+    options:
+      - Nothing, since FP8 arithmetic is not being used
+      - About double, because each decode step now streams half as many bytes
+      - About four times, because FP8 math is four times faster
+      - It halves, because conversions add work
+    answer: 1
+    explanation: Single-user decode sits far below the ridge point, so its time is bytes ÷ bandwidth. Halving the bytes per weight halves the bytes per step and roughly doubles the speed, whether or not the arithmetic itself runs in FP8. It also halves the memory the weights need.
+  - question: Why did BF16, rather than FP16, become the standard 16-bit format for training?
+    options:
+      - BF16 has more mantissa bits, so it is more precise
+      - BF16 keeps FP32's 8 exponent bits, so it covers the same range of magnitudes and tiny gradients do not underflow to zero
+      - FP16 is not supported by GPUs
+      - BF16 uses less memory than FP16
+    answer: 1
+    explanation: Both formats are 16 bits. FP16 spends more bits on precision (10 mantissa bits) and fewer on range (5 exponent bits), so very small or very large values fall outside what it can represent unless the training loop carefully rescales them. BF16 gives up precision to keep FP32's range, which matters more for gradients spanning many orders of magnitude.
+  - question: What makes a systolic array efficient at matrix multiplication compared with ordinary processor lanes?
+    options:
+      - It runs at a much higher clock speed
+      - It skips multiplications by zero
+      - Each value is fetched once and then passed directly between neighbouring units and reused across the array, so almost no energy or bandwidth goes into moving operands through register files and memory
+      - It uses larger numbers
+    answer: 2
+    explanation: In an ordinary core every multiply-add reads its operands from a register file and writes the result back. A systolic array loads weights once, streams inputs through, and hands partial sums from one unit to the next. The data movement per operation, which is what costs, almost disappears.
+  - question: A company is deciding whether to build a custom AI chip for its own models instead of buying GPUs. Which risk comes from the specialisation itself?
+    options:
+      - Custom chips cannot multiply matrices
+      - The chip takes years to design, and if model architectures, precisions or operations shift in that time, work that fits its fixed units poorly falls back to slow paths, with less software support than GPUs have
+      - Custom chips cannot use HBM
+      - GPUs are always cheaper per FLOP
+    answer: 1
+    explanation: Specialisation is a bet that the workload will look like it does today. A GPU's programmability and its mature software stack absorb change; an ASIC gains efficiency by fixing more in silicon and must bring its own compilers and kernels. Companies with large, stable, internal workloads are the ones for whom that bet pays.
+---
+
+Google has designed its own AI chips, TPUs, since 2015. Amazon has Trainium, Meta has MTIA and Microsoft has Maia. Startups build chips the size of a whole silicon wafer. Meanwhile each new Nvidia generation quotes peak numbers at ever-smaller formats, FP8 and now FP4, with peak figures doubling each time. What are all these designs actually doing differently? And why hasn't any of them displaced the GPU?
+
+They are all pulling the same few levers, each of which follows from the roofline.
+
+## The picture
+
+<Recall id="gpu">
+
+A GPU runs tens of thousands of simple lanes in warps of 32. Matrix multiplication suits it because it is massively parallel, regular and full of reuse: threads load tiles of each matrix into on-chip memory once and reuse them many times.
+
+</Recall>
+
+<Recall id="memory-wall">
+
+On the roofline, attainable throughput is min(peak, intensity × bandwidth), where intensity is operations per byte moved. Below the ridge point a workload is memory-bound, above it compute-bound. HBM bandwidth has grown more slowly than compute.
+
+</Recall>
+
+Even inside a GPU, moving data costs more than arithmetic. For an ordinary lane, each multiply-add means fetching and decoding an instruction, reading operands from the register file, and writing the result back. All of that costs more energy than the multiply-add itself. An <Term id="ai-accelerator">accelerator</Term> is a design that removes as much of that overhead as possible for one kind of work: multiplying matrices. There are three levers:
+1. **Do more per instruction.** Make one instruction compute a whole small matrix product, so the control overhead is shared across hundreds or thousands of multiply-adds.
+2. **Move data between neighbours, not through memory.** Pass values directly from one arithmetic unit to the next so that each number fetched is used many times on the way.
+3. **Use fewer bits per number.** Every number that is half as wide takes half the bandwidth, half the capacity and much less silicon to multiply.
+
+<Figure
+  name="systolic-array"
+  title="A systolic array: data pulses through a grid of multipliers"
+  caption="Weights sit fixed in a 4 × 4 grid of multiply-accumulate units. Token vectors enter from the left, staggered by one step per row; partial sums flow down; finished dot products leave at the bottom."
+  notice="The diagonal wave of activity. Each input value is fetched once and then used by every unit in its row, with no trip back to memory in between."
+/>
+
+<KeyIdea>
+
+An AI accelerator is a machine for multiplying matrices while moving as few bytes, and spending as little control, per operation as possible. Big matrix instructions and systolic data flow cut the overhead per FLOP. Halving the bits per number doubles effective bandwidth, capacity and arithmetic at once, for both memory-bound and compute-bound work.
+
+</KeyIdea>
+
+## Tensor cores and systolic arrays
+
+Nvidia added <Term id="tensor-core">tensor cores</Term> to its GPUs in 2017. A tensor core executes a small matrix multiply-accumulate as a single operation. On an H100 one warp-level instruction can compute a 16 × 8 × 16 tile: 2,048 multiply-adds from one instruction, compared with 32 for an ordinary lane instruction across a warp. That is where the H100's roughly 990 TFLOP/s in BF16 comes from. Its ordinary lanes manage about 67 TFLOP/s in 32-bit floats, so the tensor cores give about fifteen times more. Most of the arithmetic of a modern data-center GPU lives in these units.
+
+Google's TPU took the idea further with a <Term id="systolic-array">systolic array</Term>, the design in the figure. The first <Term id="tpu">TPU</Term> contained a 256 × 256 grid of 8-bit multiply-accumulate units, 65,536 of them, working in lockstep. The weights are loaded once. Inputs enter from one edge and pass from unit to unit, each unit multiplying by its weight and adding the running sum that arrives from its neighbour. Each number read from memory is used up to 256 times without ever touching a register file. The name comes from the heart: data is pumped through the array in regular beats.
+
+Both designs raise the arithmetic done per byte and per instruction, which is the whole game.
+
+## Fewer bits per number
+
+Numbers in a neural network do not need 32 bits. What they need is enough **range** (how large and how small a value can be, set by the exponent bits) and just enough **precision** (how finely values are spaced, set by the mantissa bits).
+
+<Figure
+  name="number-formats"
+  static
+  title="Number formats, bit by bit"
+  caption="Each row is one number in a different floating-point format: sign, exponent and mantissa bits. On the right, the memory the weights of a 70-billion-parameter model need in each format."
+  notice="BF16 keeps all 8 of FP32’s exponent bits and cuts the mantissa. Each step down halves the memory."
+/>
+
+The history is a march down this figure:
+- <Term id="bf16">BF16</Term>, which keeps FP32's range with less precision, became the standard for training around 2018–2020. It uses 2 bytes per number instead of 4.
+- <Term id="fp8">FP8</Term> arrived in hardware with the H100 (2022). It is widely used for inference, and increasingly for parts of training.
+- **FP4** arrived with Nvidia's Blackwell generation (2024). With only 15 distinct values it relies on <Term id="microscaling">block scaling</Term>: each small block of numbers shares a scale factor, so the 4 bits only have to describe values relative to their neighbours.
+
+Halving the bits pays off **twice**:
+- **Bandwidth and capacity.** A byte of HBM now holds twice as many numbers, so memory-bound work moves half the bytes and runs about twice as fast, and twice as many parameters fit.
+- **Arithmetic.** A multiplier's size and energy grow faster than linearly with the number of mantissa bits, so a chip can fit at least twice as many narrow multipliers in the same area and power. Nvidia's peak figures double at each step: an H100 does about 990 dense TFLOP/s in BF16 and about 1,980 in FP8; a B200 does about 4,500 in FP8 and 9,000 in FP4.
+
+<Example title="a 70B model at three precisions">
+
+Decode for one user is memory-bound, so each token takes about (weight bytes) ÷ (bandwidth). On H100-class GPUs (80 GB, 3.35 TB/s each):
+
+| Format | Weights | GPUs to hold them | Tokens/s per GPU (ceiling) |
+|---|---|---|---|
+| BF16 | 140 GB | 2 | ≈ 24 |
+| FP8 | 70 GB | 1 | ≈ 48 |
+| 4-bit, block-scaled | ≈ 37 GB | 1 | ≈ 90 |
+
+The BF16 model needs two GPUs and reads 140 GB per token across both, so each token takes about 21 ms (≈ 48 tokens/s for the pair, 24 per GPU). In FP8 one GPU does the same job at the same speed. Four-bit weights help even on a chip without 4-bit arithmetic: they can be unpacked to a wider format on chip, and the saving in bytes is what matters.
+
+</Example>
+
+The cost is accuracy. Fewer mantissa bits means coarser steps; fewer exponent bits means values can overflow or vanish. Training still keeps a high-precision master copy of the weights (<Term id="mixed-precision">mixed precision</Term>), and low-precision formats need careful per-block or per-tensor scaling. Squeezing a trained model to 8 or 4 bits for serving is <Preview id="serving-at-scale">quantisation</Preview>, which usually costs little quality but not always nothing.
+
+## Custom chips and the software moat
+
+An <Term id="asic">ASIC</Term> (application-specific integrated circuit) is a chip designed for one job. Google's TPUs, Amazon's Trainium, Meta's MTIA and Microsoft's Maia are ASICs for neural networks, as are several startups' designs. By leaving out what a GPU carries for generality, they can spend more of the silicon and power on matrix units and on-chip memory, tune the chip and its network to the owner's own models, and avoid paying a chip vendor's margin.
+
+What they give up is flexibility, in two forms:
+- **Hardware bets.** A chip takes two to three years from design to deployment. If models shift in the meantime (new attention variants, mixture-of-experts routing, new precisions), work that doesn't fit the fixed units falls back to slow paths. A GPU is more programmable and absorbs change better.
+- **Software.** <Term id="cuda">CUDA</Term>, Nvidia's programming platform since 2007, comes with tuned libraries for matrix math, attention and communication, profilers, and a very large pool of developers who know it. Frameworks such as PyTorch, JAX and compilers like Triton and XLA hide much of the hardware, but the last stretch of performance usually lives in hand-tuned kernels, and those exist for CUDA first. A rival chip must match the software as well as the silicon.
+
+The line has blurred from both sides. Data-center GPUs now devote much of their area to tensor cores and have dropped most of their graphics hardware. TPUs have become more programmable with each generation.
+
+## Reason with it
+
+**Why would a chip holding its weights entirely in on-chip SRAM give very fast single-user generation, and what does it cost?** On-chip SRAM has far more bandwidth than HBM, so memory-bound decode speeds up enormously. But SRAM is much less dense: a chip holds hundreds of megabytes, not tens of gigabytes. A 70B model in 8 bits needs 70 GB, which is about 300 chips at 230 MB each. The design trades capacity for bandwidth, and makes up the capacity by spreading one model over many chips, which then have to communicate.
+
+**Why does each new format make the headline FLOPs jump, and when is that jump real?** Peak FLOPs double at each halving of bits. The jump is real for compute-bound work that tolerates the format: large batched matrix multiplies in inference, and increasingly in training. For memory-bound work, what speeds it up is the halving of *bytes*, which also comes for free with the format. Work that cannot use the format, such as operations that need high precision, gets neither.
+
+**Why might a cloud provider build its own chip even if it is slower than the best GPU?** What matters to the provider is cost per useful token or per training run, not peak speed. With its own models, its own software team and enough volume to amortise years of design, a slightly slower chip that costs much less and that it controls can win on total cost of ownership and on supply security. A company without those conditions does better with the flexible option.
+
+## Where this picture breaks
+
+- **Peak is not delivered.** Real workloads reach a fraction of the headline number, and low-precision peaks are hardest to reach because the surrounding operations (normalisation, softmax, communication) do not shrink with them.
+- **A chip is more than its matrix units.** HBM, the links to other chips and the software determine much of real performance. Many accelerators win on paper per chip and lose at system scale, which is the subject of <Preview id="distributed-training">distributed training</Preview>.
+- **Precision is not free.** Some layers and operations still need 16 or 32 bits, training in very low precision needs careful scaling to stay stable, and quantised models can lose quality in ways that benchmarks miss.
+
+## Why it matters in the feed
+
+When a chip launch quotes FP4 PFLOP/s, divide by two for FP8, again for BF16, and check whether the number is sparse or dense. When a hyperscaler announces a new generation of its in-house chip or a large order from a chip-design partner, read it as a bet on cost and control over the most stable part of its workload. And when commentators talk about the "CUDA moat", they mean the software lever in this lesson. It explains why a competitor's better hardware has not been enough on its own (<Preview id="semiconductors">more on the industry side</Preview>).
+
+## Recap
+
+- Even on a GPU, moving operands costs more than the multiply-add. Accelerators specialise to **cut data movement and control per FLOP**.
+- **Tensor cores** do a whole matrix tile per instruction; **systolic arrays** pass data between neighbouring units, reusing each value across the array. Both are the GPU's matrix-multiply reuse, built into hardware.
+- **Halving the bits** (BF16 → FP8 → FP4) halves the bytes per number and roughly doubles the arithmetic per chip. That speeds up both sides of the memory-wall roofline, at a cost in accuracy that needs scaling tricks to manage.
+- **ASICs** such as TPUs trade flexibility and software maturity for efficiency and cost. CUDA's ecosystem is a large part of why GPUs remain the default.

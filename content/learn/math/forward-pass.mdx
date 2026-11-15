@@ -1,0 +1,172 @@
+---
+id: forward-pass
+title: Networks & the forward pass
+summary: How stacking layers lets a network untangle problems a single neuron cannot, seen as a sequence of reshapings of space. Each layer applies a linear transformation, then folds the result.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [neuron, matrices]
+related: [vectors, probability, gpu]
+keywords: ["forward pass", "hidden layer", "hidden size", "multilayer perceptron", "MLP", "ReLU", "activation function", "feed-forward"]
+quiz:
+  - question: You delete every activation function from a 10-layer network and keep all the weights. What can the network now represent?
+    options:
+      - The same functions as before, because the weights are unchanged
+      - Only what a single linear layer (one matrix plus a bias) can represent
+      - Nothing useful, because every output becomes zero
+      - More than before, because nothing is clipped at zero any more
+    answer: 1
+    explanation: A linear map applied after a linear map is again one linear map, since W₂(W₁x + b₁) + b₂ = (W₂W₁)x + (W₂b₁ + b₂). Without the folds, ten layers collapse into one transformation that can only rotate, stretch and shift space. Depth only adds power because each layer can fold.
+  - question: In the figure, why does the single line h₁ + h₂ = 1 separate the classes after the ReLU step when no line could before?
+    options:
+      - The linear step moved the points further apart
+      - ReLU folded the plane so that the two rose clusters, which sat on opposite corners, both landed on the far side of the line, away from the corner
+      - ReLU deleted the blue points
+      - The line was allowed to bend after ReLU
+    answer: 1
+    explanation: The linear step alone keeps the rose clusters on opposite sides of the blue ones, because straight lines stay straight. ReLU zeroes negative coordinates, folding the plane onto the positive axes. Both rose clusters end up far from the origin, and both blue clusters end up near it. In the folded space a straight line is enough.
+  - question: A language model has hidden size 4,096, and each MLP block maps 4,096 → 16,384 → 4,096. Roughly how many multiply-adds does one MLP block perform per token?
+    options:
+      - About 16 thousand
+      - About 67 million
+      - About 134 million
+      - About 17 billion
+    answer: 2
+    explanation: Each layer costs (inputs × outputs) multiply-adds, because every weight is used once per token. 4,096 × 16,384 + 16,384 × 4,096 = 2 × 67.1M ≈ 134M. That is one block of one layer; a model runs dozens of these per token, which is why the cost of the forward pass tracks the parameter count.
+  - question: A network squeezes a 100-dimensional input through a hidden layer of width 2 before the output. Using the picture of layers as reshapings of space, what follows?
+    options:
+      - Nothing important; later layers can recover any detail
+      - Every input must be placed in a 2-D space, so inputs that land on the same point can never be told apart by any later layer
+      - The network becomes linear
+      - Training becomes faster with no loss of accuracy
+    answer: 1
+    explanation: Each layer's width is the number of axes of the space the data lives in at that point. Mapping 100 dimensions into 2 must merge many directions. Two inputs sent to the same 2-D point are identical to every later layer, which only sees the new coordinates. Width is the capacity of the representation, the "axes of nuance" of meaning-as-geometry.
+---
+
+A single neuron can only draw one straight boundary through its input space. Yet the concepts we want models to handle are anything but straight: "is this sentence sarcastic", "is this a cat", "what word comes next". This lesson shows how **stacking neurons into layers, and layers into networks** gets from straight lines to arbitrarily complex decisions. It also shows what the **<Term id="forward-pass">forward pass</Term>**, the computation every model runs for every token it reads or writes, is actually doing.
+
+## The picture
+
+Start from the mental model of this path: data lives as points in a space, and meaning is where the points are and which way they point. A network layer is a **reshaping of that space**. Each layer does two things:
+
+1. **Move linearly.** A matrix rotates, stretches, squashes or shears the whole space, and a bias shifts it. Straight lines stay straight and the grid stays evenly spaced.
+2. **Fold.** An activation function bends the space. With ReLU, every negative coordinate is set to zero, so whole regions are folded flat onto the axes.
+
+The forward pass pushes each input point through a sequence of these reshapings. The job of training is to find the reshapings that make the answer easy by the end: at the last layer, the thing you care about should be *a straight line away*.
+
+<Figure
+  name="space-folding"
+  title="A layer reshapes space: move, then fold"
+  caption="Two classes on opposite corners (the classic XOR pattern) cannot be split by one line. A linear step rotates and squashes the grid; ReLU folds it onto the axes; in the new coordinates a single straight line separates the classes."
+  notice="In step 2 the grid lines stay straight and evenly spaced. Only in step 3 do they bend, and that bend is what makes the final line possible."
+/>
+
+<KeyIdea>
+
+A deep network is a stack of *move-then-fold* steps. Linear steps alone can never untangle anything, because they keep straight lines straight. The folds let later layers treat as neighbours points that started far apart, and pull apart points that started close. After enough folds, the answer is a straight line away.
+
+</KeyIdea>
+
+## From one neuron to a layer
+
+<Recall id="neuron">
+
+A neuron computes a weighted sum of its inputs plus a bias, $z = \mathbf{w} \cdot \mathbf{x} + b$, then applies an <Term id="activation-function">activation function</Term>. The weight vector $\mathbf{w}$ is a direction: the neuron responds most strongly to inputs that point the same way.
+
+</Recall>
+
+A **layer** is simply several neurons reading the same input. Give each neuron its own weight vector, then stack those vectors as the rows of a matrix $W$. Computing every neuron at once is then one matrix-vector product:
+
+$$
+\mathbf{z} = W\mathbf{x} + \mathbf{b}, \qquad \mathbf{h} = \mathrm{ReLU}(\mathbf{z})
+$$
+
+<Recall id="matrices">
+
+Multiplying by a matrix transforms the whole space at once. Each output coordinate is the dot product of the input with one row, so each row is a direction the matrix measures, and output $i$ says how strongly the input points along row $i$.
+
+</Recall>
+
+Read the equation with the picture in mind. Row $i$ of $W$ is a direction the $i$-th neuron "listens for", and $z_i$ measures how much the input points that way. The output $\mathbf{h}$ is therefore **a new set of coordinates for the same input**: one coordinate per detector. A layer of width 4,096 re-describes every input along 4,096 learned axes. The hidden layers of a network (every layer between input and output is a <Term id="hidden-layer">hidden layer</Term>) are the successive coordinate systems the data passes through.
+
+<Example title="untangling XOR by hand">
+
+The figure uses four clusters: rose near $(1,1)$ and $(-1,-1)$, blue near $(1,-1)$ and $(-1,1)$. No line separates them; the classes are not <Term id="linear-separability">linearly separable</Term>. Take
+
+$$
+W = \begin{pmatrix} 1 & 0.9 \\ -0.9 & -1 \end{pmatrix}, \quad \mathbf{b} = \mathbf{0}.
+$$
+
+| input $\mathbf{x}$ | $\mathbf{z} = W\mathbf{x}$ | $\mathbf{h} = \mathrm{ReLU}(\mathbf{z})$ | $h_1 + h_2$ |
+|---|---|---|---|
+| rose $(1, 1)$ | $(1.9, -1.9)$ | $(1.9, 0)$ | 1.9 |
+| rose $(-1, -1)$ | $(-1.9, 1.9)$ | $(0, 1.9)$ | 1.9 |
+| blue $(1, -1)$ | $(0.1, 0.1)$ | $(0.1, 0.1)$ | 0.2 |
+| blue $(-1, 1)$ | $(-0.1, -0.1)$ | $(0, 0)$ | 0 |
+
+After the fold, an output neuron $y = h_1 + h_2 - 1$ is positive for rose (0.9) and negative for blue (−0.8 and −1). One hidden layer of two ReLU neurons has solved a problem no single neuron can.
+
+</Example>
+
+## Why the fold is everything
+
+What if we skipped the activation? Two linear layers in a row give
+
+$$
+W_2(W_1\mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2 = (W_2W_1)\,\mathbf{x} + (W_2\mathbf{b}_1 + \mathbf{b}_2),
+$$
+
+which is again *one* matrix and *one* bias. Any number of linear layers collapses into a single linear transformation. In the picture, moving the grid twice is still just moving the grid. Every bit of expressive power that depth adds comes from the non-linear folds.
+
+<Term id="relu">ReLU</Term> ($\max(0, z)$) is the simplest useful fold. Each ReLU neuron creases space along one line (in higher dimensions, a hyperplane): on one side it passes values through, on the other it flattens them to zero. A layer of $n$ ReLU neurons adds $n$ creases, and its output is **piecewise linear**: flat patches joined at the creases. With $n$ creases, a 2-D input plane can be cut into at most about $n^2/2$ patches. Stacking layers folds the already folded space, so the number of patches can grow *exponentially* with depth. That is the geometric reason deep networks can fit intricate boundaries that a single wide layer would need vastly more neurons to match. The <Term id="universal-approximation">universal approximation</Term> results say that, with enough neurons, such piecewise shapes can approximate any reasonable function as closely as you like. They do not say how many neurons you need, or how to find the weights.
+
+## The forward pass, end to end
+
+A network with two hidden layers is three move-then-fold steps. The last one has no fold, so its outputs are free to be any real number:
+
+$$
+\mathbf{h}_1 = \mathrm{ReLU}(W_1\mathbf{x} + \mathbf{b}_1), \quad
+\mathbf{h}_2 = \mathrm{ReLU}(W_2\mathbf{h}_1 + \mathbf{b}_2), \quad
+\mathbf{y} = W_3\mathbf{h}_2 + \mathbf{b}_3
+$$
+
+This architecture is called a **multilayer perceptron** (<Term id="mlp">MLP</Term>). The raw outputs $\mathbf{y}$ are scores, called <Term id="logits">logits</Term>. For a classifier they are turned into probabilities with softmax, exactly as in <LessonLink id="probability" />.
+
+<Figure
+  name="forward-pass"
+  title="The forward pass: one matrix multiply per layer"
+  caption="A signal enters on the left and each layer lights up in turn. Edge colour shows the sign of each weight (indigo positive, amber negative) and thickness its size. Under each gap is the one matrix multiply that computes the whole layer."
+  notice="Every edge of a layer lights at the same moment. The layer is computed all at once as one matrix-vector product, not neuron by neuron."
+/>
+
+Two practical consequences follow directly from the equations.
+
+**Cost is counted in multiply-adds.** A layer from $n_\text{in}$ to $n_\text{out}$ uses each of its $n_\text{in} \times n_\text{out}$ weights exactly once per input, as one multiply and one add. For a whole network, the forward pass therefore costs about **2 × (number of parameters)** floating-point operations per input. This rule of thumb is quoted everywhere for language models, where the "input" is one token.
+
+**Inputs travel in batches.** Put many inputs side by side as the columns of a matrix $X$. The layer becomes a matrix-*matrix* product $WX$, the same weights applied to a whole batch. This is the operation GPUs are built to do fast. <Preview id="gpu">Why that shape of work suits a GPU so well</Preview> is the subject of the Compute path.
+
+## Reason with it
+
+**Why do networks need both width and depth?** Width is the number of axes in each intermediate space, which sets how many distinctions a layer can hold at once and how many creases it can make. Depth is the number of times you can fold the folded space, and it lets later layers build on earlier distinctions ("edge", then "shape", then "face"). A very wide, shallow network can in principle fit the same function, but it must make every crease in a single step. That usually takes far more neurons.
+
+**What happens if a hidden layer is narrower than the information that must pass through it?** Each layer's width is the dimension of the space the data lives in at that point. Squeeze 100 dimensions through 2, and many different inputs must land on the same point. Once merged, no later layer can separate them, because later layers only see the new coordinates. This is the "dimensions are axes of nuance" idea in action. It is also why models deliberately use narrow bottlenecks when they *want* to compress, for example in embeddings.
+
+**Why are the internal representations of trained networks often "linearly readable"?** The final layer is linear, and training pushes every earlier layer to arrange the data so that the answer *is* a direction the last layer can read off. So in a trained model, concepts the model uses tend to become directions in its hidden spaces. Researchers exploit this when they train simple linear "probes" on a model's activations to test whether it represents, say, sentiment or truthfulness.
+
+## Where this picture breaks
+
+- **Two dimensions mislead about thousands.** Real hidden layers have hundreds to tens of thousands of dimensions. There, folds happen along thousands of hyperplanes at once, and almost every pair of random directions is nearly perpendicular. The 2-D figure shows the *kind* of thing a layer does, not what it feels like at scale.
+- **The picture shows what is computed, not how the weights were found.** We chose $W$ for XOR by hand. Real networks start from random weights and find useful folds by descending a loss landscape, the second mental model of this path. That is the subject of <LessonLink id="gradient-descent" />.
+- **Modern activations fold smoothly.** Language models mostly use GELU or SwiGLU, which bend rather than crease. The geometry is the same idea with rounded corners.
+- **Language models are more than MLPs.** An MLP processes each token on its own. Transformers interleave MLP blocks with attention, which lets tokens pull information from each other. <Preview id="transformer">How the two fit together</Preview> comes later in this path.
+
+## Why it matters in the feed
+
+When a model card lists "hidden size 8,192, 80 layers", it is describing the width of each coordinate system and how many reshapings the model performs. When a lab reports that a model has 70 billion parameters, most of those numbers are entries of the $W$ matrices in these layers. The rule "forward pass ≈ 2 × parameters FLOPs per token" connects that headline figure directly to inference cost and hardware demand, a thread picked up throughout the Compute path.
+
+## Recap
+
+- A layer computes $\mathbf{h} = \mathrm{ReLU}(W\mathbf{x} + \mathbf{b})$: stack the neurons' weight vectors from the neuron lesson as rows of a matrix, and the whole layer is one matrix multiply.
+- In the picture, a layer is a *move* (the matrix transformation from the matrices lesson) followed by a *fold* (the activation). The hidden layers are the successive coordinate systems the data passes through.
+- Without folds, any stack of layers collapses into a single linear map. Depth gets its power from folding already-folded space.
+- The forward pass costs about 2 × parameters operations per input, and it runs in batches as matrix-matrix products.
+- Training's job is to find folds that leave the answer a straight line away. How it does that is next.

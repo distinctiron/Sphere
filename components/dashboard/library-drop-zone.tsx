@@ -2,6 +2,7 @@
 
 import { useDroppable } from "@dnd-kit/core";
 import { cn } from "@/lib/utils";
+import { SketchFrame } from "@/components/sketch";
 
 interface LibraryDropZoneProps {
   children: React.ReactNode;
@@ -13,32 +14,20 @@ export function LibraryDropZone({ children, isEmpty }: LibraryDropZoneProps) {
     id: "library-drop-zone",
   });
 
-  if (isEmpty) {
-    return (
-      <div
-      ref={setNodeRef}
-      className={cn(
-        "w-full min-h-[400px] transition-colors rounded-lg p-2",
-        isOver && "bg-slate-50 border-2 border-slate-300 border-dashed"
-      )}
-    >
-      <p className="text-muted-foreground">
-          Add article to your library.
-        </p>
-    </div>
-    );
-  }
-
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "w-full min-h-[400px] transition-colors rounded-lg p-2",
-        isOver && "bg-slate-50 border-2 border-slate-300 border-dashed"
+        "relative min-h-[400px] w-full p-2 transition-colors",
+        isOver && "bg-[rgba(255,212,59,0.18)]"
       )}
     >
-      {children}
+      {isOver && <SketchFrame seed="library-drop-zone" w={576} h={400} dashed />}
+      {isEmpty ? (
+        <p className="relative font-hand text-2xl text-pencil">Add article to your library.</p>
+      ) : (
+        <div className="relative">{children}</div>
+      )}
     </div>
   );
 }
-

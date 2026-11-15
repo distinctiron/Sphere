@@ -1,0 +1,179 @@
+---
+id: attention
+title: Attention
+summary: How tokens share information. Each token asks a question (query), advertises what it holds (key) and offers content (value). Queries are compared with keys by dot product, softmax turns the scores into weights, and each token takes a weighted mix of values. In a decoder, only earlier tokens are visible.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [embeddings, vectors, matrices, probability]
+related: [transformer, inference, gpu, memory-wall]
+keywords: ["attention", "self-attention", "attention mechanism", "multi-head attention", "attention heads", "query key value", "causal mask", "FlashAttention", "grouped-query attention", "Attention Is All You Need"]
+quiz:
+  - question: In the sentence “The animal didn’t cross the street because it was too tired”, a decoder model is processing the token “it”. Can this token’s attention use the word “tired” to decide what “it” refers to?
+    options:
+      - Yes, attention looks at the whole sentence
+      - No. In a decoder, “it” can only attend to itself and earlier tokens; the disambiguation has to happen later, at “tired”, which can look back at both “it” and “animal”
+      - Yes, but only in the last layer
+      - No, because attention only looks at the previous token
+    answer: 1
+    explanation: The causal mask hides every later token, so at “it” both nouns are still plausible and the weights split between them. When “tired” arrives, its query can align with “animal” and “it”, and the resolved meaning is written into that later token’s vector. Information flows forward only.
+  - question: A query vector is scaled up to twice its length, with its direction unchanged. What happens to that token’s attention weights?
+    options:
+      - Nothing, because only direction matters
+      - All scores double, so after softmax the weights become sharper; the best-aligned token gains weight and the rest lose it
+      - All weights double
+      - The weights become more uniform
+    answer: 1
+    explanation: Scores are dot products, so doubling the query doubles every score. Softmax depends on differences between scores, and those differences doubled too, which concentrates the weight on the best match. This is also why scores are divided by √d; otherwise long vectors in wide models would make softmax almost one-hot.
+  - question: A model’s context grows from 8,000 to 32,000 tokens. Roughly how does the number of query–key scores computed per head, per layer, change when processing the whole prompt?
+    options:
+      - It stays the same
+      - It grows 4 times
+      - It grows about 16 times
+      - It grows about 64 times
+    answer: 2
+    explanation: Every token scores against every earlier token, so the count is about n²/2. Four times more tokens gives 4² = 16 times more scores. This quadratic growth is why long contexts are expensive and why so much engineering goes into attention kernels.
+  - question: Using the vectors lesson, why can the same token pay attention to different things in different heads?
+    options:
+      - Each head has its own query and key projections, so it measures alignment in a different subspace; two tokens can align along one head’s directions and be perpendicular along another’s
+      - Heads see different parts of the sentence
+      - Each head uses a different softmax temperature chosen at random
+      - Heads are copies of each other that vote
+    answer: 0
+    explanation: A head’s projection matrices pick which directions of the token vectors it compares. The dot product only sees alignment along those directions, so “is this the noun I refer to?” and “is this the previous token?” can be separate questions answered by different heads at once.
+---
+
+After the embedding lookup, every token has a vector, but each vector knows only its own token. “Bank” has the same vector in “river bank” and in “bank loan”, and “it” has no idea which noun it stands for. Language is made of such dependencies, often spanning many words. A model needs a way for tokens to *read from each other*.
+
+**Attention** (strictly <Term id="self-attention">self-attention</Term>, since the tokens of one text attend to each other) is that mechanism. It is the core of the transformer, the reason context windows exist, and the thing the <Term id="kv-cache">KV cache</Term> in every inference server stores. Its cost is why long context is expensive. This lesson builds it from the geometry you already have.
+
+## The picture
+
+Each token’s vector is a point in meaning-space. Attention lets every token **update its point by pulling in information from other tokens**, in proportion to how relevant they are. Relevance is itself geometric. Every token projects its vector three ways:
+
+- a **query**: the direction it is looking for (“I am a pronoun; which noun do I refer to?”);
+- a **key**: the direction it advertises (“I am a singular animate noun”);
+- a **value**: the content it would hand over if chosen.
+
+A token scores every visible token by how well its query **aligns** with their keys, turns the scores into weights that sum to 1, and adds the weighted mix of their values to its own vector.
+
+<Figure
+  name="attention-geometry"
+  title="One attention step, in two dimensions"
+  caption="The token “it” sends out a query (rose). It is compared with the keys of “the”, “cat” and “it” itself by dot product; softmax turns the scores into weights; the output is the weighted sum of the three value vectors."
+  notice="The key of “cat” points closest to the query’s direction, so cat takes 85% of the weight, and the output lands almost on cat’s value. Alignment decides who is heard."
+/>
+
+<KeyIdea>
+
+Attention is a soft, learned lookup. Each token asks a question with its query, every visible token answers with how well its key aligns, and the asker receives a blend of their values weighted by that alignment. Which questions get asked, and what counts as a match, are learned directions in the space.
+
+</KeyIdea>
+
+## Queries, keys and values
+
+<Recall id="embeddings">
+
+Each token enters the model as a learned vector, one row of the embedding table. Training places tokens used in similar ways in similar directions, but the vector is the same wherever the token appears.
+
+</Recall>
+
+<Term id="query-key-value">Queries, keys and values</Term> are three different views of the same token vector $\mathbf{x}$, made by three learned matrices:
+
+$$
+\mathbf{q} = W_Q\,\mathbf{x}, \qquad \mathbf{k} = W_K\,\mathbf{x}, \qquad \mathbf{v} = W_V\,\mathbf{x}
+$$
+
+<Recall id="matrices">
+
+A matrix can project a vector into a smaller space: each output coordinate is the dot product of the input with one row, so the rows choose which directions of the input survive.
+
+</Recall>
+
+Each projection keeps only the directions useful for its role. $W_K$ might extract “what kind of noun am I”, while $W_Q$, for a pronoun, extracts “what kind of noun am I looking for”, **expressed in the same small space** so the two can be compared.
+
+<Recall id="vectors">
+
+The dot product $\mathbf{a} \cdot \mathbf{b}$ is large and positive when two vectors point the same way, near zero when they are perpendicular, and negative when they point apart.
+
+</Recall>
+
+<Recall id="probability">
+
+Softmax turns any list of scores into probabilities: exponentiate each score, then divide by the total. Larger score differences give a sharper, more peaked distribution.
+
+</Recall>
+
+The score of token $j$ for asking token $i$ is $\mathbf{q}_i \cdot \mathbf{k}_j$. Softmax over the visible tokens gives weights $a_{ij}$ that are positive and sum to 1, and the output is the weighted mix $\sum_j a_{ij}\,\mathbf{v}_j$. For all tokens at once, with queries, keys and values stacked as rows of $Q$, $K$ and $V$:
+
+$$
+\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}\right) V
+$$
+
+$QK^\top$ is the table of every query-key dot product. The division by $\sqrt{d_k}$, the square root of the key dimension, keeps scores in a sensible range: dot products of $d_k$-dimensional vectors grow with $\sqrt{d_k}$, and without the correction softmax in a wide model would put nearly all weight on a single token from the start.
+
+<Example title="the numbers in the figure">
+
+Two-dimensional queries and keys, so $d_k = 2$ and $\sqrt{2} \approx 1.41$. The token “it” has query $\mathbf{q} = (2, 1)$.
+
+| token | key $\mathbf{k}$ | $\mathbf{q} \cdot \mathbf{k}$ | ÷ √2 | weight | value $\mathbf{v}$ |
+|---|---|---|---|---|---|
+| the | $(0, 1)$ | 1 | 0.71 | 0.05 | $(0, 1)$ |
+| cat | $(1.5, 2)$ | 5 | 3.54 | 0.85 | $(3, 1)$ |
+| it | $(1, 0)$ | 2 | 1.41 | 0.10 | $(1, -1)$ |
+
+The weights come from $e^{0.71} \approx 2.03$, $e^{3.54} \approx 34.3$ and $e^{1.41} \approx 4.11$, divided by their sum, 40.5. The output is
+
+$$
+0.05\,(0, 1) + 0.85\,(3, 1) + 0.10\,(1, -1) \approx (2.65,\ 0.80),
+$$
+
+close to cat’s value. Without the $\sqrt{2}$ the weights would be 0.02, 0.94 and 0.05: sharper, and sharper still in hundreds of dimensions.
+
+</Example>
+
+## Only looking back
+
+A language model is trained to predict each next token. If a token could attend to the tokens after it, it could simply read the answer. So a decoder applies a <Term id="causal-mask">causal mask</Term>: before the softmax, the scores for every later token are set to $-\infty$, which makes their weights exactly zero. Token $i$ attends to tokens $1$ to $i$ and nothing else.
+
+This has three consequences you will meet again. Training can process every position of a document in parallel, because no position needs a later one. Information flows only forward. And once a token’s keys and values are computed, nothing that comes later can change them, which is what makes <Preview id="inference">the KV cache</Preview> possible.
+
+<Figure
+  name="attention-explorer"
+  interactive
+  title="Where each token looks"
+  caption="Select any token to see its attention weights over itself and the earlier tokens (darker is more weight). Later tokens are masked. Switch between three illustrative heads, and change the last word of the sentence."
+  notice="At “it”, the weight is split between “animal” and “street”: the word that decides has not arrived yet. At the last word, “tired” looks back at “animal” and “wide” at “street”."
+/>
+
+## Many heads, many questions
+
+One set of projections can ask only one kind of question. So each layer runs several <Term id="attention-head">attention heads</Term> side by side, each with its own $W_Q$, $W_K$ and $W_V$ projecting into its own small subspace. With a model width of 4,096 and 32 heads, each head works in 128 dimensions. One head may track the previous token, another which noun a word concerns, another syntax, and many do things no one has named. This is <Term id="multi-head-attention">multi-head attention</Term>: heads look in different directions of the same space, so two tokens can match strongly for one head and not at all for another.
+
+The heads’ outputs are placed side by side and projected back to the model width by one more matrix, $W_O$. Counting parameters: $W_Q$, $W_K$, $W_V$ and $W_O$ are each $d \times d$ in total across heads, so a layer’s attention holds $4d^2$ weights, about 67 million at $d = 4{,}096$. Crucially, those weights do not depend on how long the text is. The *computation* does: every token scores every earlier token.
+
+## Reason with it
+
+**Why is long context expensive, beyond storing it?** Each of $n$ tokens computes a score against every earlier token, about $n^2/2$ scores per head per layer. Double the prompt and the attention work quadruples, while the work of the weight matrices only doubles. At short contexts the weight matrices dominate the cost. At hundreds of thousands of tokens, attention does, which is why labs invest in special attention kernels and in variants that skip distant tokens.
+
+**Why can a model copy a name it saw only once, earlier in the prompt?** Attention retrieves by content, not by position. A head whose query encodes “what followed the last time this token appeared” will align with the key of the token after the earlier occurrence, and move its value forward. Trained models develop such “induction” heads, and they are a large part of how models use examples given in the prompt. No weight has to store the name; the context does.
+
+**What does attention do if the text is shuffled?** On its own, nothing different. Scores depend only on the content of queries and keys, so shuffling the tokens just shuffles the outputs. “Dog bites man” and “man bites dog” would look alike. Word order has to be written into the vectors themselves, which is the job of positional encoding in <Preview id="transformer">the transformer</Preview>.
+
+## Where this picture breaks
+
+- **Heads are not tidy questions.** The “which noun?” head is a cleaned-up story. Real heads often mix several patterns and do things that resist a one-line description. The attention explorer shows the kinds of patterns found, with hand-set numbers.
+- **Weights are not explanations.** High weight on a token means its value was mixed in, not that it caused the answer. What the value carries, and what later layers do with it, matters as much.
+- **Softmax must spend 100%.** Even when nothing is relevant, the weights sum to 1. Models learn to park the surplus on a harmless token, often the first. This “attention sink” is a side effect of the formula, not of meaning.
+- **Production attention is modified.** Models share keys and values between groups of query heads (grouped-query attention) to shrink the KV cache, restrict some layers to a recent window, or approximate attention to escape the $n^2$ cost. The picture stays: queries align with keys and mix values.
+
+## Why it matters in the feed
+
+When a lab advertises a million-token context window, attention’s quadratic cost and the KV cache are the engineering behind the claim. When a paper introduces a faster attention kernel or a new “linear attention” architecture, it is attacking the $n^2$ table of scores. When interpretability researchers report finding a head that does a specific job, they are reading these query-key alignments. And the 2017 paper that introduced the transformer was titled after this mechanism: *Attention Is All You Need*.
+
+## Recap
+
+- Each token projects its embedding (from the embeddings lesson) into a **query**, a **key** and a **value** with learned matrices, the projections of the matrices lesson.
+- Alignment is the dot product of the vectors lesson: a token scores each visible token by query · key, divided by √d_k.
+- Softmax from the probability lesson turns scores into weights that sum to 1. The output is the weighted mix of values.
+- A **causal mask** hides later tokens, so information flows forward only and earlier keys and values never change.
+- **Multiple heads** ask different questions in different subspaces. Attention weights take $4d^2$ parameters per layer, but the work grows with the square of the context length.

@@ -1,19 +1,22 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { SketchCorner, SketchFrame } from "@/components/sketch"
 
+/** A sheet of paper with a three-pass pencil outline and corner shading. Pass `seed` to vary the wobble. */
 const Card = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
+  React.HTMLAttributes<HTMLDivElement> & { seed?: string; shadow?: boolean }
+>(({ className, seed = "card", shadow = true, children, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn(
-      "rounded-xl border bg-card text-card-foreground shadow",
-      className
-    )}
+    className={cn("sk-card relative text-card-foreground", className)}
     {...props}
-  />
+  >
+    <SketchFrame seed={seed} w={560} h={220} />
+    {shadow && <SketchCorner seed={`${seed}:c`} />}
+    <div className="sk-lift">{children}</div>
+  </div>
 ))
 Card.displayName = "Card"
 
@@ -35,7 +38,7 @@ const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("font-semibold leading-none tracking-tight", className)}
+    className={cn("font-hand text-[28px] font-bold leading-none", className)}
     {...props}
   />
 ))

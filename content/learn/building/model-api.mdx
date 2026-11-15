@@ -1,0 +1,181 @@
+---
+id: model-api
+title: The model API
+summary: What actually crosses the boundary when an application calls a language model. A request is one context (system prompt plus messages), the reply is tokens sampled one at a time, and the model keeps nothing between calls, so the client resends everything.
+minutes: 11
+model: context-machine
+buildsOn: [sampling, inference]
+related: [post-training, context-engineering, tool-use, hosting, unit-economics]
+keywords: ["context window", "system prompt", "API pricing", "per million tokens", "structured output", "JSON mode", "streaming", "chat completions", "Messages API", "input tokens"]
+reviewed: 2026-09-29
+quiz:
+  - question: In turn 1 a user tells a chat app “call me Sam”. By turn 40 the assistant no longer uses the name. Which explanation fits the picture of a stateless model?
+    options:
+      - The model's memory of early turns decays over time, like human memory
+      - A higher temperature made the model forget
+      - The harness stopped sending turn 1, for example because it trims the oldest messages to stay within a token budget
+      - The provider retrained the model between turns
+    answer: 2
+    explanation: The model remembers nothing between calls; each call sees only the context it is sent. If the name is gone, the app (the harness) stopped including the message that contained it, usually by trimming or summarising old turns to fit the window or a cost budget. Nothing in the model decayed.
+  - question: A chat app resends the full history on every call. Each turn adds a 300-token question and a 500-token reply. As the conversation gets longer, which cost grows fastest?
+    options:
+      - Total input tokens billed, which grow roughly with the square of the number of turns
+      - Output tokens, because replies are the expensive kind
+      - Neither; every turn costs the same
+      - The system prompt, because it is resent every time
+    answer: 0
+    explanation: Call n carries all n−1 earlier turns, so its input grows linearly with n and the sum over a conversation grows with n². Output grows only linearly (one reply per call). Even though output tokens cost several times more each, input dominates long conversations unless the provider caches the repeated prefix.
+  - question: With streaming turned on, why does a request with a 100,000-token document still pause noticeably before the first word appears?
+    options:
+      - Streaming is disabled for long prompts
+      - The model generates the whole answer first and then streams it
+      - Network transfer of the prompt takes most of the time
+      - The whole prompt must be read in the prefill pass before the first output token can be sampled, and that pass grows with prompt length
+    answer: 3
+    explanation: Streaming sends each output token as soon as decode produces it, but decode cannot start until prefill has processed every input token and built the KV cache. Prefill is compute-bound and grows with prompt length, so time to first token grows with the document. Streaming hides the pace of decode, not the cost of prefill.
+  - question: An API enforces a JSON schema by constrained decoding. What does that guarantee?
+    options:
+      - That the values in the JSON are correct
+      - That the output parses and matches the schema's shape; the model can still put wrong or invented values in valid fields
+      - That the model will refuse unsafe requests
+      - That the output is identical on every call
+    answer: 1
+    explanation: Constrained decoding masks, at every sampling step, the tokens that would break the schema, so the text is guaranteed to have the right shape. It does not change what the model believes, so a field can be perfectly well-formed and wrong. Code that consumes the output still has to validate the content.
+---
+
+Every AI product you use, whether a chatbot, a coding agent or Sphere's own paper chat, is at bottom an ordinary program making requests to a model. The request is some text; the reply is some more text. Everything this path covers (tools, retrieval, agents, harnesses, skills) is built from that one exchange, repeated.
+
+So it pays to know exactly what crosses that boundary. The shape of the exchange is simple: a context goes in, tokens come out, and nothing is remembered in between. That shape explains why chat apps "forget", why long conversations get slow and expensive, and why the rest of this path is mostly about deciding what to put in the context.
+
+## The picture
+
+This path's mental model: **the model is a stateless function from context to next token**. The code around it, the <Term id="agent-harness">harness</Term>, decides what goes into the context and what to do with what comes out, inside a loop. The simplest harness is a chat app, and the simplest loop is a conversation.
+
+The <Term id="context-window">context window</Term> is the model's entire world for one call. The model does not know your earlier conversation, today's date, your files or who you are, unless the harness wrote them into the context of *this* call. Nothing is kept afterwards, so a chat app must resend the whole conversation every time.
+
+<Figure
+  name="context-window"
+  title="One conversation, four calls, four complete contexts"
+  caption="Each column is one API call in the same conversation. The client sends the system prompt and every earlier message again, the model generates a reply on top (rose), and that reply becomes part of the next call's input. The stack climbs towards the context limit."
+  notice="Nothing carries over between columns on its own. Every block in column 4 was sent again by the client, including the replies the model itself wrote."
+/>
+
+<KeyIdea>
+
+A model API call is **one context in, tokens out**. The context window is the model's whole world, and it is rebuilt from scratch by the client on every call. "Memory", "conversation" and "knowledge of your project" are all things the harness chooses to write into that window.
+
+</KeyIdea>
+
+## What a request contains
+
+A request to a chat model is a list of **messages**, each with a role. In the <Term id="message-roles">roles</Term> convention most APIs share:
+
+- **system**: the application's standing instructions, written by the developer ("You answer questions about one arXiv paper, citing passages as [n]"). This is the <Term id="system-prompt">system prompt</Term>.
+- **user**: what the person typed, or anything else the application wants to present as input.
+- **assistant**: the model's earlier replies.
+
+A stripped-down request looks like this:
+
+```json
+{
+  "model": "some-model",
+  "system": "You answer questions about the paper below. Cite passages as [n].",
+  "messages": [
+    { "role": "user", "content": "What does this paper claim?" },
+    { "role": "assistant", "content": "It claims that sparse attention ..." },
+    { "role": "user", "content": "How large was the model they trained?" }
+  ],
+  "max_tokens": 1024,
+  "temperature": 0.3
+}
+```
+
+The roles are not separate channels into the model. The server flattens the whole list into **one token sequence**, with special marker tokens between the parts, and ends it with the marker that opens an assistant turn. The model then does the only thing it can do: continue the sequence.
+
+<Recall id="post-training">
+
+A pretrained model only continues text. Post-training (supervised fine-tuning on example conversations, then reinforcement learning from feedback) teaches it to act as the assistant in that chat format: to follow the system and user turns and to stop when its turn is done.
+
+</Recall>
+
+So the system prompt carries weight only because post-training taught the model to treat text in that position as the developer's instructions. It is a strong convention the model learned, not a permission system. That distinction matters a great deal <Preview id="agent-security">once untrusted text enters the context</Preview>.
+
+<Recall id="sampling">
+
+Generation is autoregressive: the model outputs a probability distribution over the next token, one token is sampled from it and appended, and the process repeats. Temperature rescales the distribution before sampling. Low temperature concentrates probability on the likeliest tokens; high temperature spreads it out.
+
+</Recall>
+
+The request's parameters control that loop. `max_tokens` caps how many tokens the reply may contain. `temperature` (and relatives like top-p) shape each sampling step. Stop sequences end generation when a given string appears. The response reports *why* generation ended, its <Term id="stop-reason">stop reason</Term>: the model finished its turn, it hit `max_tokens` mid-sentence, or, as we will see with <Preview id="tool-use">tool use</Preview>, it paused to ask the harness to do something.
+
+## Stateless: the client carries the memory
+
+Because the model keeps nothing, **every piece of continuity is the client's job**. A chat app stores the conversation and sends all of it on each call; the figure shows exactly that. Several consequences follow.
+
+- **The history is editable.** The client can drop, rewrite or summarise earlier turns, and even write an assistant turn the model never produced. The model cannot tell, because it has no record of its own past to compare against.
+- **The window forces choices.** Once a conversation outgrows the window, or a cost budget, the client must decide what to keep. Sphere's paper chat keeps only the most recent turns that fit a budget of about 6,000 tokens, always starting with a user turn, because some APIs reject a history that begins with an assistant message.
+- **"Memory" is a harness feature.** When a product remembers your preferences across chats, it has saved some text somewhere and is writing it into the context of new conversations. The model's weights did not change. Some APIs will also store a conversation on the provider's side for you. That moves the resending to their servers; it does not change what the model reads on each call.
+
+Who runs the model behind the endpoint, on what hardware and at what margin, is a separate question: see <LessonLink id="hosting" />.
+
+## Tokens: the unit of everything
+
+Everything about an API call is measured in **<Term id="token">tokens</Term>**, the chunks of text the model reads and writes. In English a token is about four characters, or three-quarters of a word. The context window limit counts tokens, and it counts the input *plus* the output: a model with a 200,000-token window that is sent 195,000 tokens has only 5,000 left to answer in.
+
+Providers price input and output tokens separately, per million tokens, and output is usually several times more expensive.
+
+<Recall id="inference">
+
+Serving a model has two phases. **Prefill** reads the whole prompt in one parallel pass and is compute-bound; it sets the time to first token. **Decode** generates one token per step, streaming all the weights and the KV cache from memory each time, so it is memory-bound and sets the pace of the reply. A repeated prompt prefix can be cached so its prefill is skipped.
+
+</Recall>
+
+The price sheet is that picture in dollars. Input tokens are read in bulk during prefill, where the hardware is used efficiently. Output tokens each cost a full decode step. A discounted "cached input" price, where offered, is the saving from skipping prefill for a prefix the server has already processed.
+
+<Example title="the cost of a long chat">
+
+Take the figure's numbers: a 500-token system prompt, 300-token questions and 500-token replies. Call $n$ sends the system prompt, $n - 1$ earlier exchanges and the new question:
+
+$$
+\text{input}_n = 500 + 800(n-1) + 300 = 800\,n \text{ tokens}.
+$$
+
+Over a 20-turn conversation the client sends $800 \times (1 + 2 + \dots + 20) = 800 \times 210 = 168{,}000$ input tokens, but receives only $20 \times 500 = 10{,}000$ output tokens.
+
+At illustrative prices of \$3 per million input tokens and \$15 per million output tokens, that is \$0.50 of input against \$0.15 of output. Output tokens cost five times as much each, yet input dominates the bill, because the history is read again on every call. Total input grows with the *square* of the number of turns.
+
+</Example>
+
+## Streaming and structured output
+
+**<Term id="streaming-response">Streaming</Term>.** Decode produces one token per step, so a server can send each token as soon as it exists instead of waiting for the whole reply. Most APIs do this over a long-lived HTTP response that delivers small events; Sphere's paper chat relays each chunk to the browser the same way. Streaming does not make generation faster; it shows the answer while it is being made. The user still waits for the time to first token, which is prefill, so a huge prompt still pauses before the first word.
+
+**Structured output.** A harness often needs to *act* on a reply, not display it: fill a database row, choose a branch, call a function. For that the reply must parse. You can ask for JSON in the prompt, and a well-trained model usually complies. Many APIs can also **enforce** a JSON schema, producing <Term id="structured-output">structured output</Term>. At each sampling step, the server masks every token that would make the text violate the schema, so only valid continuations can be sampled. The output is then guaranteed to parse. It is not guaranteed to be *true*: the model can put a wrong value in a perfectly valid field.
+
+## Reason with it
+
+**Why does a chatbot "forget" things said early in a long conversation?** The model never remembered them. When the history outgrows the window, or the app's budget, the harness drops or summarises old turns, and a detail in a dropped turn no longer exists for the model. Products that care about memory store key facts separately and deliberately write them back into each context.
+
+**Why does a long chat get slower to start answering and more expensive per turn?** Each call resends the whole history, so each call's prompt is longer than the last. Prefill time grows with prompt length, so time to first token rises. Input cost per call rises linearly with the turn number, and the conversation's total rises with its square. The fix follows from the same picture: keep the unchanging part of the context at the front, where a provider's prefix cache can skip its prefill, and trim what the model no longer needs.
+
+**If you send the same request twice at temperature 0, will you get the same answer?** Usually, but not reliably. Temperature 0 means <Term id="greedy-decoding">always taking the most likely token</Term>, which removes sampling randomness. But the server batches your request with others, and batch shape can change the order of floating-point operations enough to flip a near-tie between two tokens. One flipped token changes the context for every later token, so the replies can diverge from there. And any change to the context at all, even a timestamp in the system prompt, is a different input to the function.
+
+## Where this picture breaks
+
+- **"Stateless" describes the model, not the whole service.** Prefix caches, stored conversations and memory features are state, but it lives in the serving and harness layers; the weights do not change while you use them.
+- **Not everything is text.** Images, audio and PDFs are converted into tokens (or token-like vectors) in the same context and count against the same window. The picture holds; the unit of input is just broader.
+- **Tokens are not words.** Tokenizers differ between models, and some languages and some code take noticeably more tokens per word than English. Token counts, and so prices and window sizes, are only comparable across models approximately.
+- **Some output is invisible.** <Term id="reasoning-model">Reasoning models</Term> generate "thinking" tokens before their answer. Depending on the API these are hidden or summarised, but they are generated by decode, fill the window and are usually billed as output.
+- **A big window is not uniform attention.** Models use information in very long contexts less reliably than in short ones, and where it sits matters. That is the subject of <Preview id="context-engineering">context engineering</Preview>.
+
+## Why it matters in the feed
+
+When a lab announces a larger context window, read it as a bigger world per call: more of your documents fit, but every call that uses it pays prefill and KV-cache costs for all of it. When a provider cuts prices per million tokens, the input/output split tells you which workloads benefit: chat and agents that resend long histories are input-heavy. As of mid-2026, frontier models commonly advertise windows from a few hundred thousand to around a million tokens (a few claim more), with output typically priced at several times input.
+
+## Recap
+
+- An API call is one context (system prompt plus role-tagged messages, flattened into one token sequence) in, and a sampled continuation out. Roles work because post-training taught the model the chat format, not because of any enforcement.
+- The model keeps nothing between calls. The client resends the history, so memory, trimming and editing of history are all harness decisions.
+- Tokens are the unit of limits and price. Output costs more than input because of decode versus prefill, as in the inference lesson, but resent history makes input dominate long conversations.
+- Streaming shows decode as it happens without speeding it up; time to first token is still prefill.
+- Structured output constrains sampling so replies parse, which is what lets code act on them. The shape is guaranteed; the content is not.

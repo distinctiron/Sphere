@@ -1,0 +1,171 @@
+---
+id: agent-loop
+title: The agent loop
+summary: An agent is a model calling tools in a loop until it decides the task is done. Each lap is one model call reading a context that grows with every step, which is why agents need stopping rules, error recovery and checks, and why small per-step error rates compound over long tasks.
+minutes: 11
+model: context-machine
+buildsOn: [tool-use, model-api]
+related: [sampling, context-engineering, rag, harness-engineering, evals, agent-security]
+keywords: ["AI agent", "agentic", "agent loop", "autonomous agent", "ReAct", "coding agent", "long-horizon tasks", "multi-step reasoning", "agentic workflow"]
+quiz:
+  - question: An agent completes each step correctly 99% of the time, and steps fail independently. Roughly how often does it complete a 100-step task without an error?
+    options:
+      - About 99% of the time
+      - About 90% of the time
+      - About 37% of the time
+      - About 1% of the time
+    answer: 2
+    explanation: Every one of the 100 steps must succeed, so the probabilities multiply. 0.99¹⁰⁰ ≈ 0.37. Per-step reliability that sounds excellent still fails most long tasks, which is why checks that catch and repair errors matter so much.
+  - question: An agent appends about 2,000 tokens per step, and each model call re-reads the whole context. What happens to the total input tokens as the task gets longer?
+    options:
+      - They grow roughly with the square of the number of steps, because call k re-reads all k−1 earlier steps
+      - They grow linearly with the number of steps
+      - They stay constant because the model remembers earlier steps
+      - They shrink as the model learns the task
+    answer: 0
+    explanation: The model keeps nothing between calls, so each call is sent the full, growing history. The sum 1 + 2 + … + n grows with n². Because the context only grows at the end, prefix caching can make the re-reading much cheaper, but the window still fills.
+  - question: Sphere's paper chat always retrieves passages once and then answers; the model never decides to search again. Why might a designer choose this fixed workflow over an agent loop?
+    options:
+      - Agents cannot use retrieval
+      - Workflows produce longer answers
+      - Agent loops require a larger model by law
+      - The steps are known in advance, so a fixed sequence is cheaper, faster and more predictable, with fewer places for errors to compound
+    answer: 3
+    explanation: An agent pays for flexibility with more model calls, a growing context and compounding error. When the right sequence is known up front, fixing it in code removes those costs. Reach for a loop when the next step genuinely depends on what the previous one found.
+  - question: An agent tries the same failing command five times in a row. Using context engineering, why does this pattern feed itself?
+    options:
+      - The tool is broken, so the model has no choice
+      - Each failed attempt stays in the context, and the model continues the pattern it sees, so its own repeated attempts act like examples of what to do next
+      - The temperature is too low to allow any other action
+      - Agents cannot read error messages
+    answer: 1
+    explanation: The context is also a record of the agent's own behaviour, and models copy what the context demonstrates. Harnesses break the loop by detecting repetition and adding a note, summarising the failures away, or stopping to ask for help.
+---
+
+"Agent" is one of the most overloaded words in AI. Strip away the marketing and a precise, useful definition remains: **a model that calls tools in a loop, and decides for itself what to do next and when to stop**. Coding assistants that edit files and run tests, research tools that search and read for minutes at a time, and "computer use" systems that click through websites are all this one loop with different tools.
+
+That definition predicts a great deal. It tells you why agents get expensive, why they sometimes loop forever or give up too early, why they are better at code than at open-ended web tasks, and why reliability is the whole game.
+
+## The picture
+
+<Recall id="tool-use">
+
+A tool call is text the model writes and the harness chooses to act on. The harness executes the call, appends the call and its result to the history, and calls the model again. The model reads the result like any other context.
+
+</Recall>
+
+In the tool-use lesson, the model made one round of calls and then answered. An <Term id="ai-agent">agent</Term> removes that limit. The harness keeps going for as long as the model keeps asking for tools:
+
+```ts
+const context = [instructions, toolDefinitions, task];
+for (let step = 0; step < MAX_STEPS; step++) {
+  const reply = await callModel(context);   // think
+  context.push(reply);
+  if (reply.toolCalls.length === 0) break;  // no request: the model is done
+  for (const call of reply.toolCalls) {
+    context.push(await runTool(call));      // act, then observe the result
+  }
+}
+```
+
+That is a complete agent. Everything else is refinement.
+
+<Figure
+  name="agent-loop"
+  title="Every lap is a model call; every step stays in the context"
+  caption="The loop: observe (the context now holds the latest result), think (one model call decides the next action), act (the harness runs the tool), check (did it work, is the task done?). Each lap appends the tool call and its result to the context. When the model replies without a tool call, the loop ends."
+  notice="The context bar only ever grows. By the final call, the model is re-reading every earlier step."
+/>
+
+<KeyIdea>
+
+An agent is a loop in which the model chooses each next action by reading a context that records everything so far. That **context is the agent's entire state**: its task, its plan, its progress and its mistakes. Nothing about the task persists anywhere else unless the harness puts it there.
+
+</KeyIdea>
+
+## What changes when you loop
+
+**The model chooses the path.** In a <Term id="agentic-workflow">workflow</Term>, code fixes the sequence of steps. Sphere's paper chat is one: retrieve passages once, then answer. In an agent, the model decides the sequence as it goes. That buys flexibility, since the agent can handle tasks whose steps cannot be known in advance, at the cost of predictability, speed and money. A useful rule: use a workflow when you can write down the steps, and an agent when the next step depends on what the last one found.
+
+**Plans are context.** Models act better when they reason before acting and re-plan after each result. This interleaving of reasoning and tool calls is often called the <Term id="react-pattern">ReAct pattern</Term>, after the paper that named it. A written plan or to-do list works because every later call reads it: it is an instruction the agent wrote for its future self. Reasoning models do some of this planning in their hidden thinking tokens.
+
+**The context grows with every step.**
+
+<Recall id="model-api">
+
+The model keeps nothing between calls, so every call is sent its whole context, and input tokens are billed on every call. Long conversations therefore cost roughly the square of their length in total input.
+
+</Recall>
+
+An agent is a conversation with itself that can run for hundreds of turns, and each tool result (a file, a web page, a test log) can be thousands of tokens. So agents hit the budget from context engineering hard, and in three ways: cost, latency, and eventually a full window. There is one saving grace. An agent's context is *append-only*: each call's context is the previous call's context plus a little more. That is the ideal shape for prefix caching, since each call can reuse everything the last one read.
+
+<Example title="the cost of 50 steps">
+
+Take the figure's numbers: a 1,500-token task and tool definitions, and about 2,000 tokens per step for the tool call and its result. Call $k$ reads $1{,}500 + 2{,}000(k - 1)$ tokens. Over 50 calls:
+
+$$
+50 \times 1{,}500 + 2{,}000 \times (0 + 1 + \dots + 49) = 75{,}000 + 2{,}000 \times 1{,}225 = 2{,}525{,}000 \text{ tokens}.
+$$
+
+That is two and a half million input tokens for a task whose final context is only about 100,000 tokens long. Without caching, the re-reading is 25 times the size of the context itself. With caching, most of it is billed at the cached rate, but the final window still has to hold 100,000 tokens.
+
+</Example>
+
+**Stopping is a decision.** The natural stop is the model replying without a tool call. The harness adds hard stops: a maximum number of steps, a token or cost budget, a time limit, a human pressing stop. Both ways of stopping can fail. An agent may declare victory before the task is done (it claims the tests pass without running them) or never converge (it keeps trying variations). A good <Term id="stopping-condition">stopping condition</Term> is checkable: "done when the test suite passes", not "done when you think it's done".
+
+**Errors become recoverable.** As in the tool-use lesson, a failed call returns an error as a result. In a single call that is the end; in a loop, the next lap can read the error and try something else. That is the agent's great strength, and it depends entirely on errors being *visible* in the context.
+
+## Why reliability compounds
+
+Suppose each step succeeds with probability $p$, independently. A task that needs $n$ steps to all go right succeeds with probability
+
+$$
+P(\text{task}) = p^{\,n}.
+$$
+
+At $p = 0.95$ and $n = 20$, that is $0.95^{20} \approx 0.36$. A model that gets 19 of every 20 steps right fails nearly two tasks in three. This is <Term id="compounding-errors">compounding error</Term>, and it is the single most important number in agent design.
+
+<Figure
+  name="reliability-compounding"
+  interactive
+  title="Per-step reliability, raised to the number of steps"
+  caption="Task success if every step must succeed. Move the per-step success rate and the task length; then add a check that catches 80% of failed steps and lets the agent retry once."
+  notice="At 95% per step, going from 10 to 40 steps takes the task from 60% to 13%. Adding the check moves the 20-step task from 36% to 79%, a bigger gain than any plausible improvement to the raw step."
+/>
+
+The way out is the "check" in the loop. If a step's failure can be *detected*, it can be retried. With a check that catches 80% of failures and one retry, a step succeeds with $p + (1-p) \times 0.8 \times p$, which is 0.988 at $p = 0.95$. Over 20 steps that gives $0.988^{20} \approx 0.79$. Checks can be tests, type checkers, schema validation, comparing a result with the goal, or a second model reviewing the first. Whatever turns a silent error into a visible one converts compounding failure into recoverable failure.
+
+## Reason with it
+
+**Why are agents so much better at coding than at open-ended web tasks?** Code comes with cheap, reliable checks: it compiles or it doesn't, and the tests pass or they don't. Every step can be verified and repaired, so the effective per-step reliability is high and long tasks become feasible. On the open web, "did that click do what I wanted?" is often ambiguous, and a wrong step can go unnoticed for many steps. The model may be equally capable in both; the checks are not.
+
+**Why can an agent get stuck repeating the same failing action?** Its context now contains several examples of itself trying that action. As context engineering showed, models continue the patterns their context demonstrates, and the agent's own history is part of that context. Its failed attempts act as few-shot examples of what to do next. Harnesses break the pattern from outside: they detect repetition and add a note, summarise the failures away, change strategy or stop and ask a human.
+
+**Why does the same agent succeed on a task one run and fail the next?** Every model call samples. A different word early on can lead to a different first tool call, a different result and a different path. Because errors compound along the path, small differences early make large differences in outcome.
+
+<Recall id="sampling">
+
+Each token is sampled from the model's predicted distribution, so unless decoding is greedy the same context can produce different continuations. Temperature controls how spread out that sampling is.
+
+</Recall>
+
+So an agent's quality is a distribution, not a number. It has to be measured over many runs, which is why <Preview id="evals">agent evaluations</Preview> report success rates across repeated trials.
+
+## Where this picture breaks
+
+- **Steps are not independent.** $p^n$ assumes each step fails on its own. In practice, a misunderstanding of the task makes every step wrong together, while a harmless slip may not matter at all. The formula shows the direction and scale of the effect, not a prediction.
+- **"Agent" also names other things.** Multi-agent systems, fixed workflows with model steps and chatbots with one tool are all called agents. The loop in this lesson is the common core; recognise which parts of a system are code-chosen and which are model-chosen.
+- **The bare loop has no memory beyond its window.** A long task will fill the context. Keeping it going needs harness machinery such as compaction, notes written to files and sub-agents with fresh windows: the subject of <Preview id="harness-engineering">harness engineering</Preview>.
+- **Autonomy multiplies the stakes of every tool.** A loop that can act without asking can also be steered by what it reads, which is where <Preview id="agent-security">agent security</Preview> begins.
+
+## Why it matters in the feed
+
+When a lab says its model is "more agentic", look for gains in per-step reliability, recovery from errors and knowing when to stop, since those are what long tasks need. Researchers increasingly measure agents by the length of task, in human working time, that they complete with 50% reliability. The compounding in this lesson explains why that measure moves so sharply: small per-step gains buy large jumps in feasible task length. When an agent demo impresses, ask what checks the task had. When a deployment disappoints, ask how many steps it needed.
+
+## Recap
+
+- An agent is the tool-use exchange from C3 in a loop: the model keeps calling tools until it replies without one, or a hard limit stops it.
+- The context is the agent's whole state. It grows with every step and is re-read on every call, as the model API lesson predicts, so input cost grows roughly with the square of the number of steps (prefix caching helps because the context is append-only).
+- Use a fixed workflow when the steps are known, and a loop when each step depends on the last.
+- Per-step success raised to the number of steps ($p^n$) is why long tasks fail. Checks that make errors visible, followed by retries, are the most powerful lever.
+- Sampling makes each run a different path, so agent quality is a success rate over many runs.

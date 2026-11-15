@@ -1,0 +1,146 @@
+---
+id: data-center
+title: Inside an AI data center
+summary: What an AI data center is made of, from the rack to the gigawatt campus, and why it looks so different from a traditional one. Chips that must sit close together to talk force extreme power density, which forces liquid cooling and new power and network designs.
+minutes: 11
+model: feeding-the-math
+buildsOn: [distributed-training]
+related: [accelerators, energy, buildout, hyperscalers, hosting]
+keywords: ["data center", "data centre", "AI data center", "liquid cooling", "rack density", "gigawatt", "GB200 NVL72", "hyperscale campus", "AI factory", "cooling towers"]
+reviewed: 2026-09-29
+quiz:
+  - question: Why did AI racks move from air cooling to liquid cooling as their power rose past a few tens of kilowatts?
+    options:
+      - Liquid cooling is quieter
+      - Water carries about 3,500 times more heat per unit volume than air, so removing 130 kW takes a few litres of water per second instead of several cubic metres of air per second through one rack
+      - Air cooling does not work for GPUs at any power
+      - Liquid cooling needs no electricity
+    answer: 1
+    explanation: Heat removed = flow × heat capacity × temperature rise. Air's heat capacity per cubic metre is tiny, so a 130 kW rack would need about 7 m³ of air per second warming by 15 °C, a gale through one cabinet. Water warming by 10 °C needs about 3 litres per second, carried in pipes to cold plates on each chip.
+  - question: Why does a GB200 NVL72 system put 72 GPUs and their NVLink switches in a single rack, making it so power-dense, instead of spreading them over several racks?
+    options:
+      - To save floor space, which is expensive
+      - Because the NVLink connections between them run over short copper cables, and keeping the whole fast domain within copper's reach avoids the cost, power and latency of optical links
+      - Because GPUs must share one power supply
+      - Because of fire regulations
+    answer: 1
+    explanation: Tensor and expert parallelism need the fastest links, and at these speeds copper only reaches about a metre or two. Packing the whole NVLink domain into one rack lets thousands of copper cables do the job cheaply. The density, and hence the liquid cooling and the heavy power feeds, are consequences of the communication wall.
+  - question: A campus draws 1 GW from the grid. If each GPU of the current generation accounts for about 2 kW of total facility power (its share of the servers, network and cooling), roughly how many GPUs can it run?
+    options:
+      - About 5,000
+      - About 50,000
+      - About 500,000
+      - About 5 million
+    answer: 2
+    explanation: 1,000,000 kW ÷ 2 kW ≈ 500,000 GPUs. Rack-level power of about 130 kW for 72 GPUs is about 1.8 kW per GPU, and cooling and other overhead add around 20% on top.
+  - question: An operator wants to install 130 kW liquid-cooled racks in a data hall built for 10 kW air-cooled racks. Which problem is NOT a real obstacle?
+    options:
+      - The power distribution was sized for a tenth of the load per rack
+      - There is no facility water loop to the racks
+      - The floor may not bear racks weighing more than a tonne
+      - The network cables are the wrong colour
+    answer: 3
+    explanation: Everything in a data hall is sized for a power density. Power feeds, cooling plant and floor loading all have to grow roughly tenfold per rack, and liquid cooling needs pipes, coolant distribution units and heat rejection that an air-cooled hall does not have. That is why AI capacity is mostly new construction rather than retrofits.
+---
+
+Announcements of AI data centers now come in gigawatts: campuses drawing as much power as a large city, costing tens of billions of dollars, built in a year or two. Inside, they look very different from the data centers that ran the web for twenty years. The racks are hotter, heavier and more tightly packed, water is piped to every chip, and the network is a machine in its own right.
+
+None of this is architectural taste. Every feature follows from the path's picture: the chips must be fed data and power, and their heat must be carried away, and all three get harder the closer together the chips need to be.
+
+## The picture
+
+<Recall id="distributed-training">
+
+Training splits a model across thousands of GPUs, and the traffic between them follows a hierarchy of links: HBM inside the chip, NVLink between nearby GPUs (about ten times slower), and the cluster network (about ten times slower again). The most talkative split, tensor parallelism, has to stay on the fastest links.
+
+</Recall>
+
+The fastest links are short. At NVLink speeds, copper cables reach only a metre or two before signals degrade, and switching to optical links adds cost, power and latency. So the GPUs that must talk most have to sit physically together. That one constraint drives the rest of the design:
+- **Density.** Tightly coupled GPUs are packed into one rack. A GB200 NVL72 rack holds 72 GPUs, 36 CPUs and the NVLink switches joining them, drawing about 130 kW. A traditional enterprise rack draws 5–10 kW.
+- **Cooling.** That much heat in one cabinet cannot be removed with air. Water is piped directly to cold plates on each chip.
+- **Power.** Each rack needs power feeds ten to twenty times larger than before, and a campus of thousands of such racks needs its own high-voltage substation.
+- **Network.** Beyond the rack, every GPU gets its own high-speed network port into a fabric that lets any GPU reach any other.
+
+<Figure
+  name="dc-zoom"
+  title="From one GPU to a gigawatt campus"
+  caption="Five levels of an AI data center, each with its approximate GPU count and power, and a marker on a logarithmic power axis. Figures are rounded for a GB200-class build in 2025–26."
+  notice="Each step up multiplies power by roughly 5 to 200 times, and the whole campus spans six orders of magnitude from a single chip."
+/>
+
+<KeyIdea>
+
+An AI data center is a machine for delivering power and bandwidth into a small volume and taking heat out of it. Density is forced by the communication wall: the chips that talk most must be within copper's reach. Liquid cooling, heavy power distribution and huge fabrics follow from that density.
+
+</KeyIdea>
+
+## Racks and power density
+
+<Recall id="accelerators">
+
+Accelerators pack more arithmetic into each chip with tensor cores and low-precision formats, and each generation's peak figures have kept climbing.
+
+</Recall>
+
+That arithmetic is paid for in watts: about 700 W for an H100, and roughly 1,000–1,200 W for its Blackwell successors. Follow the watts upward. An H100 server holds 8 GPUs and draws about 10 kW; four of them filled an air-cooled rack at about 40 kW. The GB200 NVL72 rack puts 18 compute trays (each with 4 GPUs and 2 CPUs) and 9 NVLink switch trays into one cabinet. Nvidia describes its NVLink spine as more than 5,000 copper cables, and the full rack weighs over a tonne. Its power, roughly 120–130 kW depending on configuration, is what a whole row of traditional racks used to draw. Vendor roadmaps shown in 2025 point to racks of several hundred kilowatts later in the decade.
+
+<Term id="rack-density">Rack power</Term> is the number that sizes everything else in the building: the cables and busbars, the cooling plant, even the floor.
+
+## Cooling: why water
+
+All the electricity a chip draws turns into heat, and the heat has to leave at the same rate. How much a coolant can carry depends on its heat capacity:
+
+$$
+\text{heat removed} = \text{flow} \times \text{heat capacity} \times \text{temperature rise}.
+$$
+
+<Example title="cooling one 130 kW rack">
+
+- **Air** holds about 1.2 kJ per cubic metre per °C. Warming by 15 °C, it must flow at $130{,}000 / (1{,}200 \times 15) \approx$ **7 m³ per second** through a single rack, a gale.
+- **Water** holds about 4,200 kJ per cubic metre per °C (4.2 kJ per litre), some 3,500 times more. Warming by 10 °C, it must flow at $130{,}000 / (4{,}186 \times 10) \approx$ **3 litres per second**.
+
+</Example>
+
+So AI racks use <Term id="direct-liquid-cooling">direct-to-chip liquid cooling</Term>. A cold plate, a metal block with fine internal channels, sits on each GPU and CPU. Coolant runs through the plates, collects in manifolds and goes to a <Term id="cdu">coolant distribution unit</Term> (CDU), a heat exchanger that hands the heat to the building's water loop. Outside, dry coolers or evaporative cooling towers release it to the air.
+
+<Figure
+  name="cooling-loop"
+  title="Where the heat goes"
+  caption="Coolant takes heat from cold plates on each chip to a heat exchanger (the CDU), which passes it to the facility water loop. Coolers outside the building reject it to the air."
+  notice="Two separate loops meet at the CDU. The coolant that touches the chips never leaves the rack's circuit; only heat crosses to the outside."
+/>
+
+The choice of heat rejection is a trade-off. Evaporative towers use less electricity but consume water; dry coolers consume almost no water but need more fan power and struggle in hot weather. That is why the water use of AI data centers depends so much on design and climate.
+
+## Network and campus
+
+Beyond the rack, each GPU has its own network port running at 400–800 Gb/s into the <Term id="scale-out-network">scale-out network</Term>, a fabric of switches arranged in tiers so that any GPU can reach any other at full speed. A cluster of 100,000 GPUs needs several tiers of switches and hundreds of thousands of optical transceivers. A separate front-end network connects storage and the outside world. The <Term id="scale-up-network">scale-up network</Term> (NVLink inside the rack) and the scale-out network are two different machines, matching the link hierarchy of distributed training.
+
+A hall holds a few hundred racks, tens of megawatts. A campus holds many halls and its own substation. Some rough arithmetic for a 1 GW campus: with around 20% overhead for cooling and power conversion, about 830 MW reaches the IT equipment. At 130 kW per rack that is about 6,400 racks, roughly **460,000 GPUs**. Several campuses announced in 2025–26 are planned to reach a gigawatt or more, such as the first Stargate site in Abilene, Texas, and Meta's Hyperion campus in Louisiana; their final sizes and timelines depend on power and financing.
+
+## Reason with it
+
+**Why is most AI capacity new construction rather than upgraded old data centers?** An existing hall was sized for 5–10 kW per rack: its power distribution, cooling plant and floor loading are all an order of magnitude too small, and it has no water to the racks. Upgrading means replacing nearly everything but the walls. New buildings designed around 100+ kW racks from the start are often faster.
+
+**Why can AI data centers be built far from cities?** Training traffic stays inside the cluster, so distance to users does not matter. Even for serving, a network round trip of 50–100 ms across a continent is small next to the seconds a model takes to generate an answer. So operators can go where power, land and permits are available. The main pull toward cities is for latency-sensitive services and existing fibre routes.
+
+**Where does a gigawatt go?** Almost all of it to the chips and the machinery that supports them, and all of it ends as heat. Cooling and power conversion add a fraction on top (measured by PUE, covered in <Preview id="energy">energy</Preview>). The grid connection, not the building, is usually the hardest part to get.
+
+## Where this picture breaks
+
+- **The numbers move fast.** Rack power roughly tripled between the H100 and GB200 generations, and roadmaps continue upward. Treat the specific figures here as a 2025–26 snapshot and the physics as durable.
+- **Not every AI data center is a training cluster.** Inference fleets can use smaller, lower-density, sometimes air-cooled servers, and can be spread over more sites.
+- **Designs differ.** Google's TPU pods use optical circuit switches to rewire connections between chips, and some sites use immersion cooling instead of cold plates. The constraints are the same; the engineering answers vary.
+- **Money and permits matter as much as physics.** Where and how fast campuses get built depends on capital, local politics and the grid (<Preview id="buildout">the build-out</Preview>).
+
+## Why it matters in the feed
+
+When a company announces a "1 GW AI campus", translate it: around half a million current-generation GPUs, thousands of liquid-cooled racks and a substation of its own. When you read about liquid-cooling suppliers, power equipment makers or optical transceiver vendors riding the AI boom, they sell the density, heat and network in this lesson. When a local debate concerns water, the answer depends on whether the site uses evaporative towers or dry coolers.
+
+## Recap
+
+- AI data centers are dense because **the fastest links are short**: as distributed training showed, the most talkative GPUs must be tightly coupled, and at NVLink speeds copper only reaches across a rack.
+- Rack power rose from **5–10 kW** (traditional) to about **40 kW** (air-cooled H100) to about **130 kW** (liquid-cooled GB200 NVL72), with more planned.
+- **Water carries about 3,500 times more heat per volume than air**, so hot racks need cold plates, CDUs and facility water loops.
+- The **scale-out network** gives every GPU its own port into a fabric of switches and optical links; the scale-up network (NVLink) stays in the rack.
+- A **1 GW campus** is roughly half a million GPUs. Power, not the building, is usually the binding constraint.

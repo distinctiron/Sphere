@@ -2,14 +2,16 @@
 
 import { useEffect, useState, useRef } from "react";
 import React from "react";
-import { ArrowLeft, FileText, FileCode, Sparkles, MessageSquare, Check } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { BrushTag, SketchDivider, SketchFrame } from "@/components/sketch";
 import { IntellisensePopover } from "./intellisense-popover";
+import { BackIcon, ChatIcon, CheckIcon, PencilSpinner, SparkIcon } from "./sketch-icons";
 import { DeepDivePanel, DeepDiveToggle } from "./deep-dive-panel";
 import { toast } from "sonner";
 import { PaperStatus } from "@prisma/client";
+import type { Citation } from "@/lib/rag/types";
 
 interface PaperReaderProps {
   paper: {
@@ -29,6 +31,8 @@ interface PaperReaderProps {
 interface SelectionState {
   text: string;
   position: { x: number; y: number };
+  /** Text of the paragraph containing the selection (context for retrieval) */
+  surroundingText?: string;
   range?: {
     startContainer: Node;
     startOffset: number;
@@ -36,6 +40,17 @@ interface SelectionState {
     endOffset: number;
   };
 }
+
+/** Paragraph-level text around a selection, used to locate it in the paper for RAG */
+function getSurroundingText(range: Range): string | undefined {
+  const start = range.startContainer;
+  const element = start.nodeType === Node.ELEMENT_NODE ? (start as Element) : start.parentElement;
+  const block = element?.closest("p, .ltx_para, li, td, figcaption, blockquote");
+  const text = block?.textContent?.replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 2000) : undefined;
+}
+
+const SOURCE_HIGHLIGHT_CLASS = "rag-source-highlight";
 
 // Memoized content component to prevent re-renders when selection changes
 const MemoizedContent = React.memo(
@@ -46,16 +61,14 @@ const MemoizedContent = React.memo(
           ref={ref}
           className={cn(
             "prose prose-lg max-w-none relative",
-            "prose-headings:font-serif prose-headings:text-slate-900",
-            "prose-p:text-slate-700 prose-p:leading-relaxed",
-            "prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline",
-            "prose-strong:text-slate-900 prose-strong:font-semibold",
-            "prose-code:text-indigo-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded",
-            "prose-pre:bg-slate-900 prose-pre:text-slate-100",
-            "prose-img:rounded-lg prose-img:shadow-md",
-            "prose-figcaption:text-slate-600 prose-figcaption:text-sm",
-            "prose-blockquote:border-l-indigo-600 prose-blockquote:bg-slate-50 prose-blockquote:py-2 prose-blockquote:px-4",
-            "prose-ul:text-slate-700 prose-ol:text-slate-700",
+            "prose-p:leading-[1.7]",
+            "prose-a:underline hover:prose-a:text-pen",
+            "prose-strong:font-semibold",
+            "prose-code:font-mono prose-code:text-[0.9em] prose-code:bg-[#f3f1ea] prose-code:px-1 prose-code:py-0.5",
+            "prose-pre:bg-[#f3f1ea] prose-pre:text-ink prose-pre:border-[1.5px] prose-pre:border-dashed prose-pre:border-ink/40 prose-pre:rounded-none",
+            "prose-img:rounded-none prose-img:mix-blend-multiply",
+            "prose-figcaption:text-pencil prose-figcaption:text-sm prose-figcaption:font-sans",
+            "prose-blockquote:border-l-pen prose-blockquote:not-italic prose-blockquote:py-1 prose-blockquote:px-4",
             "prose-li:my-2",
             "font-serif",
             "select-text"
@@ -81,6 +94,7 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
   const [intellisenseState, setIntellisenseState] = useState<{
     text: string;
     position: { x: number; y: number };
+    surroundingText?: string;
     explanation?: string;
   } | null>(null);
   const [paperStatus, setPaperStatus] = useState<PaperStatus>(initialStatus);
@@ -127,6 +141,14 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
     fetchHtmlContent();
   }, [paper.id]);
 
+  // Start indexing the paper for retrieval (RAG) in the background so chat and
+  // explanations can use relevant passages by the time the user asks
+  useEffect(() => {
+    fetch(`/api/papers/${paper.id}/rag`, { method: "POST" }).catch(() => {
+      // Non-critical: chat and explanations fall back to non-RAG context
+    });
+  }, [paper.id]);
+
   // If HTML is not available, default to PDF view
   useEffect(() => {
     if (error === "HTML_NOT_AVAILABLE") {
@@ -166,6 +188,7 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
             setSelection({
               text: selectedText,
               position: { x, y },
+              surroundingText: getSurroundingText(range),
             });
 
             // Auto-quote selected text in Deep Dive if panel is open (AC: 3)
@@ -224,11 +247,28 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
     setIntellisenseState({
       text: selection.text,
       position: selection.position,
+      surroundingText: selection.surroundingText,
     });
 
     // Close the context menu but keep selection highlight
     setSelection(null);
     // Don't clear the selection - let the popover handle it
+  };
+
+  // Scroll to a cited passage and briefly highlight it
+  const handleNavigateToSource = (citation: Citation) => {
+    if (viewMode !== "html" || !contentRef.current || !citation.anchorId) {
+      toast.info("This source can only be located in the HTML view.");
+      return;
+    }
+    const target = contentRef.current.querySelector<HTMLElement>(`[id="${CSS.escape(citation.anchorId)}"]`);
+    if (!target) {
+      toast.info("Couldn't locate this passage in the paper.");
+      return;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add(SOURCE_HIGHLIGHT_CLASS);
+    setTimeout(() => target.classList.remove(SOURCE_HIGHLIGHT_CLASS), 2500);
   };
 
   // Handle popover close
@@ -334,50 +374,39 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
     if (!htmlAvailable) return null;
     const currentMode: "html" | "pdf" = shouldShowPdf ? "pdf" : "html";
     return (
-      <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
-        <Button
-          variant={currentMode === "html" ? "secondary" : "ghost"}
-          size="sm"
-          onClick={() => setViewMode("html")}
-          className={cn(
-            "h-8 px-3",
-            currentMode === "html" && "bg-white shadow-sm"
-          )}
-        >
-          <FileCode className="w-4 h-4 mr-2" />
-          HTML
-        </Button>
-        <Button
-          variant={currentMode === "pdf" ? "secondary" : "ghost"}
-          size="sm"
-          onClick={() => setViewMode("pdf")}
-          className={cn(
-            "h-8 px-3",
-            currentMode === "pdf" && "bg-white shadow-sm"
-          )}
-        >
-          <FileText className="w-4 h-4 mr-2" />
-          PDF
-        </Button>
+      <div className="sk-segs" role="group" aria-label="Paper format">
+        {(["html", "pdf"] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            className="sk-seg"
+            aria-pressed={currentMode === mode}
+            onClick={() => setViewMode(mode)}
+          >
+            <span className="sk-bseg" aria-hidden="true" />
+            <span className="lbl">{mode.toUpperCase()}</span>
+          </button>
+        ))}
       </div>
     );
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen">
         <div className="container mx-auto px-4 py-8 max-w-4xl">
           <div className="flex items-center gap-4 mb-8">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
+            <Link href="/dashboard" className="sk-btn ghost small">
+              <span className="sk-bsw" aria-hidden="true" />
+              <span className="lbl">
+                <BackIcon />
                 Back to Dashboard
-              </Button>
+              </span>
             </Link>
           </div>
-          <div className="text-center py-16">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-            <p className="mt-4 text-slate-600">Loading paper...</p>
+          <div className="flex flex-col items-center py-16" role="status">
+            <PencilSpinner size={40} />
+            <p className="mt-3 font-hand text-[26px] font-bold text-pencil">Loading paper...</p>
           </div>
         </div>
       </div>
@@ -386,21 +415,22 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
 
   if (error) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen">
         <div className="container mx-auto px-4 py-8 max-w-4xl">
           <div className="flex items-center gap-4 mb-8">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
+            <Link href="/dashboard" className="sk-btn ghost small">
+              <span className="sk-bsw" aria-hidden="true" />
+              <span className="lbl">
+                <BackIcon />
                 Back to Dashboard
-              </Button>
+              </span>
             </Link>
           </div>
           <div className="text-center py-16">
-            <p className="text-red-600 mb-4">Unable to load paper. Please try again later.</p>
-            <Link href="/dashboard">
-              <Button variant="outline">Return to Dashboard</Button>
-            </Link>
+            <p className="mb-5 font-hand text-[26px] font-bold text-pen">Unable to load paper. Please try again later.</p>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard">Return to Dashboard</Link>
+            </Button>
           </div>
         </div>
       </div>
@@ -409,18 +439,18 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
 
   if (shouldShowPdf) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen">
         {/* Minimal header */}
-        <div className="border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
-          <div className="container mx-auto px-4 py-3">
-            <div className="flex items-center justify-between">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
+        <div className="sticky top-0 z-10 bg-sheet/95 backdrop-blur-sm">
+          <div className="container mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
+            <Link href="/dashboard" className="sk-btn ghost small">
+              <span className="sk-bsw" aria-hidden="true" />
+              <span className="lbl">
+                <BackIcon />
                 Back
-              </Button>
+              </span>
             </Link>
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex flex-wrap items-center gap-3">
               {/* Mark as Read button - only show when status is NEW or BEING_PROCESSED */}
               {(paperStatus === PaperStatus.NEW || paperStatus === PaperStatus.BEING_PROCESSED) && (
                 <Button
@@ -428,25 +458,27 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
                   size="sm"
                   onClick={handleMarkAsRead}
                   disabled={isMarkingAsRead}
-                  className="h-8 px-3"
                 >
                   {isMarkingAsRead ? (
                     <>
-                      <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      <PencilSpinner />
                       Marking...
                     </>
                   ) : (
                     <>
-                      <Check className="w-4 h-4 mr-2" />
+                      <CheckIcon />
                       Mark as Read
                     </>
                   )}
                 </Button>
               )}
+              {paperStatus === PaperStatus.READ && (
+                <span className="font-hand text-[22px] font-bold text-pen">✓ marked as read</span>
+              )}
               <ToggleButtons />
             </div>
-            </div>
           </div>
+          <SketchDivider seed="reader-rule" w={1440} className="absolute -bottom-1.5 left-0" />
         </div>
 
         {/* PDF Viewer */}
@@ -463,44 +495,46 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
 
   // Render HTML view
   return (
-    <div className="min-h-screen bg-white relative">
+    <div className="min-h-screen relative">
       {/* Minimal header */}
-      <div className="border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
-        <div className="container mx-auto px-4 py-3 max-w-4xl">
-          <div className="flex items-center justify-between">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
+      <div className="sticky top-0 z-10 bg-sheet/95 backdrop-blur-sm">
+        <div className="container mx-auto flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 max-w-4xl">
+          <Link href="/dashboard" className="sk-btn ghost small">
+            <span className="sk-bsw" aria-hidden="true" />
+            <span className="lbl">
+              <BackIcon />
+              Back
+            </span>
+          </Link>
+          <div className="ml-auto flex flex-wrap items-center gap-3">
+            {/* Mark as Read button - only show when status is NEW or BEING_PROCESSED */}
+            {(paperStatus === PaperStatus.NEW || paperStatus === PaperStatus.BEING_PROCESSED) && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleMarkAsRead}
+                disabled={isMarkingAsRead}
+              >
+                {isMarkingAsRead ? (
+                  <>
+                    <PencilSpinner />
+                    Marking...
+                  </>
+                ) : (
+                  <>
+                    <CheckIcon />
+                    Mark as Read
+                  </>
+                )}
               </Button>
-            </Link>
-            <div className="flex items-center gap-2">
-              {/* Mark as Read button - only show when status is NEW or BEING_PROCESSED */}
-              {(paperStatus === PaperStatus.NEW || paperStatus === PaperStatus.BEING_PROCESSED) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleMarkAsRead}
-                  disabled={isMarkingAsRead}
-                  className="h-8 px-3"
-                >
-                  {isMarkingAsRead ? (
-                    <>
-                      <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                      Marking...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4 mr-2" />
-                      Mark as Read
-                    </>
-                  )}
-                </Button>
-              )}
-              <ToggleButtons />
-            </div>
+            )}
+            {paperStatus === PaperStatus.READ && (
+              <span className="font-hand text-[22px] font-bold text-pen">✓ marked as read</span>
+            )}
+            <ToggleButtons />
           </div>
         </div>
+        <SketchDivider seed="reader-rule" w={1440} className="absolute -bottom-1.5 left-0" />
       </div>
 
       {/* Main content area with flex layout */}
@@ -515,10 +549,10 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
             isDeepDiveOpen ? "" : "max-w-4xl mx-auto"
           )}>
             {/* Paper metadata */}
-            <div className="mb-8 pb-8 border-b border-slate-200">
-              <div className="flex flex-wrap items-center gap-4 text-slate-600">
+            <div className="mb-8 pb-6">
+              <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2.5">
                 {paper.publicationDate && (
-                  <span className="text-sm">
+                  <span className="font-mono text-[13px] text-pencil">
                     {new Date(paper.publicationDate).toLocaleDateString("en-US", {
                       year: "numeric",
                       month: "long",
@@ -527,18 +561,19 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
                   </span>
                 )}
                 {paper.categories && paper.categories.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-x-3 gap-y-2">
                     {paper.categories.map((category, index) => (
-                      <span
+                      <BrushTag
                         key={index}
-                        className="text-xs bg-slate-100 text-slate-700 px-2 py-1 rounded"
-                      >
-                        {category}
-                      </span>
+                        label={category}
+                        variant={`${paper.id}:${category}`}
+                        delay={0.3 + index * 0.2}
+                      />
                     ))}
                   </div>
                 )}
               </div>
+              <SketchDivider seed={`${paper.id}:meta`} w={900} className="mt-6" />
             </div>
 
             {/* HTML content - memoized to prevent re-render on selection change */}
@@ -563,30 +598,34 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
               role="toolbar"
               aria-label="Text selection actions"
             >
-              <div className="flex items-center gap-1 bg-white rounded-full px-2 py-1.5 shadow-lg border border-slate-200">
-                <Button
-                  variant="ghost"
-                  size="sm"
+              <div className="relative flex items-center bg-sheet px-1.5 shadow-[5px_5px_0_-1px_rgba(34,37,46,0.12)]">
+                <SketchFrame seed="reader-selection-bar" w={300} h={46} />
+                <button
+                  type="button"
                   onClick={handleExplain}
-                  className="h-8 px-3 rounded-full hover:bg-slate-100 text-slate-700"
+                  className="relative inline-flex min-h-11 items-center gap-1.5 px-3.5 font-hand text-[21px] font-bold text-ink hover:text-pen focus-visible:outline-dashed focus-visible:outline-2 focus-visible:outline-pen"
                 >
-                  <Sparkles className="w-4 h-4 mr-1.5" />
+                  <SparkIcon />
                   Explain
-                </Button>
-                <div className="w-px h-4 bg-slate-300" />
-                <Button
-                  variant="ghost"
-                  size="sm"
+                </button>
+                <svg width="4" height="26" viewBox="0 0 4 26" aria-hidden="true" className="relative">
+                  <path className="sk-ink" strokeWidth={1.6} d="M2 2 C 2.5 9, 1.6 17, 2.2 24" />
+                </svg>
+                <button
+                  type="button"
                   onClick={handleAskInDeepDive}
                   className={cn(
-                    "h-8 px-3 rounded-full hover:bg-slate-100 text-slate-700",
-                    isDeepDiveOpen && "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                    "relative inline-flex min-h-11 items-center gap-1.5 px-3.5 font-hand text-[21px] font-bold text-ink hover:text-pen focus-visible:outline-dashed focus-visible:outline-2 focus-visible:outline-pen",
+                    isDeepDiveOpen && "sk-bs sk-t-cv0 still"
                   )}
                 >
-                  <MessageSquare className="w-4 h-4 mr-1.5" />
+                  <ChatIcon />
                   Ask in Deep Dive
-                </Button>
+                </button>
               </div>
+              <svg width="30" height="14" viewBox="0 0 30 16" aria-hidden="true" className="mx-auto -mt-px block overflow-visible">
+                <path className="sk-ink" strokeWidth={1.6} d="M3 2 C 9 7, 13 11, 15 14 C 18 9, 22 6, 27 2" />
+              </svg>
             </div>
           )}
 
@@ -596,8 +635,10 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
               text={intellisenseState.text}
               position={intellisenseState.position}
               paperId={paper.id}
+              surroundingText={intellisenseState.surroundingText}
               onClose={handleCloseIntellisense}
               onAskFollowUp={handleAskFollowUp}
+              onNavigateToSource={handleNavigateToSource}
             />
           )}
         </div>
@@ -616,6 +657,7 @@ export function PaperReader({ paper, initialStatus = PaperStatus.NEW }: PaperRea
               onWidthChange={setDeepDiveWidth}
               onSelectedText={handleDeepDiveSelectedText}
               initialSelectedText={deepDiveSelectedText || undefined}
+              onNavigateToSource={handleNavigateToSource}
             />
           </div>
         )}

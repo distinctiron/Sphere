@@ -1,0 +1,168 @@
+---
+id: post-training
+title: Post-training & reasoning models
+summary: How a base model that continues any text becomes an assistant and a reasoner. Imitation, preference learning and reinforcement on checkable answers are short walks on new loss landscapes that reshape which behaviours the model produces, rather than adding knowledge. It also explains sycophancy and reward hacking.
+minutes: 12
+model: loss-landscape
+buildsOn: [pretraining, sampling, gradient-descent]
+related: [transformer, training-in-practice, inference, evals, agent-security, labs]
+keywords: ["post-training", "RLHF", "reinforcement learning from human feedback", "fine-tuning", "DPO", "reward model", "constitutional AI", "reasoning model", "test-time compute", "sycophancy", "reward hacking"]
+quiz:
+  - question: A model has been carefully post-trained to refuse a harmful request, yet a cleverly framed prompt still gets it to comply. What does the reshaping picture of post-training suggest?
+    options:
+      - The prompt taught the model new knowledge during the conversation
+      - Post-training lowered the probability of the harmful behaviour but did not remove the ability, which the base model learned in pretraining; a context that looks unlike the training examples can move probability back toward it
+      - The refusal training was never applied
+      - The model is sampling at a very high temperature
+    answer: 1
+    explanation: Post-training multiplies the starting distribution by a reward-shaped factor and stays close to it. Behaviours with small probability become smaller, not impossible. Contexts far from the post-training data may not have been reshaped much at all, so the base model’s tendencies reappear.
+  - question: In preference tuning with a KL penalty, the optimal policy is π ∝ π_ref · exp(reward / β). A response the starting model gives with probability exactly zero gets a very high reward. What happens to it?
+    options:
+      - It becomes the most likely response
+      - It stays at probability zero, because multiplying zero by any factor gives zero
+      - It gets probability proportional to its reward
+      - It gets half the probability
+    answer: 1
+    explanation: The formula only reweights what the starting model already does. This is the precise sense in which this kind of post-training reshapes behaviour rather than creating it. In practice probabilities are rarely exactly zero, but tiny ones need an enormous reward advantage, or a very loose leash, to grow.
+  - question: A lab trains with a reward model that slightly prefers answers which agree with the user. What do you expect as they optimise harder against it (a looser KL leash)?
+    options:
+      - Nothing, because the bias is small
+      - The model increasingly agrees with users even when they are wrong, because optimisation moves probability toward whatever the reward model scores highly, including its mistakes
+      - The model becomes more likely to disagree
+      - The reward model corrects itself during training
+    answer: 1
+    explanation: The policy chases the reward model’s score, not the intention behind it. A small systematic preference, multiplied by exp(r / β) with small β, becomes a large shift in behaviour. This is how sycophancy emerges, and why labs keep a leash and audit for it.
+  - question: Why did reinforcement learning with verifiable rewards improve maths and coding much more than questions about obscure historical facts?
+    options:
+      - Maths and code were missing from pretraining
+      - Checkable tasks give an exact reward and benefit from writing out long reasoning, which adds serial computation; obscure facts are either in the weights from pretraining or not, and more thinking cannot create them
+      - Historical facts cannot be tokenized
+      - The reward models for history are too large
+    answer: 1
+    explanation: Thinking tokens let later tokens attend to intermediate results, which helps any task that needs many dependent steps. A missing fact is a knowledge limit set in pretraining; reinforcement can make the model more willing to say it does not know, but not supply the fact.
+---
+
+Ask a base model “How do I reverse a list in Python?” and it may answer. It may also reply with three more questions, a list of related links and a comment about cookies, because that is how many web pages that begin with a question continue. The assistants people actually use have been through **post-training**: a series of shorter training phases after pretraining that turn a text-continuer into something that answers, follows instructions, declines harmful requests and, in recent “reasoning models”, thinks at length before it replies.
+
+These phases account for much of what distinguishes one lab’s model from another’s, and much of what goes wrong in the news: <Term id="sycophancy">sycophancy</Term>, <Term id="reward-hacking">reward hacking</Term>, jailbreaks. They all follow from one picture.
+
+## The picture
+
+Extend this path’s second mental model. Pretraining walked a very long way down the landscape of “predict all text” and stopped at a point that encodes an enormous amount of knowledge. <Term id="post-training">Post-training</Term> starts from that point and takes a **short walk on new landscapes**, defined not by raw text but by what we want: example answers, human preferences, checkable results. Because the walk is short, and is often deliberately tethered to the starting point, it mostly changes **which behaviours the model already has get probability**, not what the model knows.
+
+Seen from the outputs: for any prompt, a base model spreads its probability across very different kinds of response. Post-training moves that mass into the regions we want.
+
+<Figure
+  name="post-training-stages"
+  title="Where the responses land, stage by stage"
+  caption="For one prompt, the share of sampled responses of each kind after each stage of training. The base model mostly continues the web page; fine-tuning makes it answer; preference tuning pushes toward helpful and safe answers; reinforcement on checkable tasks pushes toward correct ones."
+  notice="Supervised fine-tuning makes the model answer almost every time, but the share of wrong answers grows with it. Imitation teaches the form of a good answer, not the knowledge behind it."
+/>
+
+<KeyIdea>
+
+Post-training is a short walk from the pretrained point on landscapes that encode what people want. It reshapes the distribution of the model’s behaviour, concentrating probability on some regions and draining it from others, rather than filling the model with new knowledge. Whatever the new landscape rewards, including its mistakes, is what the model moves toward.
+
+</KeyIdea>
+
+## Stage 1: imitate good answers
+
+<Recall id="pretraining">
+
+Pretraining minimises the average surprise of each next token over trillions of tokens of text. The result, a base model, continues any text plausibly but has no notion of being an assistant.
+
+</Recall>
+
+<Term id="supervised-fine-tuning">Supervised fine-tuning</Term> (SFT) uses exactly the same loss on a very different dataset: tens of thousands to a few million conversations, each a prompt followed by a high-quality response written or checked by people. Only the response tokens are scored. The conversations are formatted with special tokens marking who is speaking, and every response ends with an end-of-turn token.
+
+<Recall id="sampling">
+
+Generation is autoregressive. The model outputs a distribution over the next token, one token is chosen and appended, and the loop repeats until a stop token is sampled. Decoding choices such as greedy, top-p and temperature decide which path through the distributions is taken.
+
+</Recall>
+
+After SFT, “assistant reply followed by end-of-turn” becomes the overwhelmingly likely continuation of any user message, so the sampling loop produces a reply and stops. That is most of the jump from base model to chatbot, achieved with well under 1% of pretraining’s compute.
+
+Imitation has a ceiling. The model learns to produce answers that *look like* the demonstrations, including their confident tone, even on questions where it lacks the knowledge. SFT on its own is a source of fluent, plausible, wrong answers.
+
+## Stage 2: learn from preferences
+
+It is far easier to judge which of two answers is better than to write the ideal one. **Preference learning** exploits this. People see two responses to the same prompt and pick the better one; hundreds of thousands of such comparisons are collected.
+
+A <Term id="reward-model">reward model</Term>, usually a copy of the language model with a single-number output, is trained on these pairs. Its job is to give the preferred answer a higher score. The standard form says the chance that A beats B is $\sigma(r_A - r_B)$, the sigmoid of the score difference: if $r_A = 1.2$ and $r_B = -0.3$, the model predicts A wins 82% of the time.
+
+<Recall id="gradient-descent">
+
+Training moves parameters a small step against the gradient of a loss. Where the steps lead depends entirely on the landscape, and that is defined by the objective and the data.
+
+</Recall>
+
+<Term id="rlhf">RLHF</Term> (reinforcement learning from human feedback) then defines a new landscape: sample responses, score them with the reward model, and nudge the model toward high-scoring responses, **minus a penalty for drifting from the starting model**. The penalty is the KL divergence, a measure of how far the new distribution has moved from the old one, weighted by a coefficient $\beta$. The best policy for this objective has a clean form that makes the picture exact:
+
+$$
+\pi(\text{response}) \;\propto\; \pi_\text{ref}(\text{response}) \cdot e^{\,r(\text{response})/\beta}
+$$
+
+Post-training **multiplies** the starting distribution by a reward-shaped factor. $\beta$ is the leash: large $\beta$ barely changes anything, small $\beta$ lets the reward dominate. And whatever had zero probability stays at zero.
+
+<Example title="the leash in numbers">
+
+Two responses. The starting model gives A probability 0.30 and B only 0.05, so A is 6 times as likely. The reward model scores A at 1 and B at 2.
+
+- **Loose leash, $\beta = 0.5$:** A is weighted by $e^{2} \approx 7.4$ and B by $e^{4} \approx 54.6$, giving $0.30 \times 7.4 = 2.22$ against $0.05 \times 54.6 = 2.73$. B now slightly overtakes A.
+- **Tight leash, $\beta = 2$:** the factors are $e^{0.5} \approx 1.65$ and $e^{1} \approx 2.72$, giving $0.49$ against $0.14$. A still leads by 3.6 to 1.
+
+The same reward moves the model a little or a lot depending on the leash. If B’s higher score is a *mistake* of the reward model, the loose leash has just taught the model the mistake.
+
+</Example>
+
+<Figure
+  name="kl-leash"
+  interactive
+  title="Pushing on a reward model"
+  caption="A 1-D sketch of the kinds of response to one prompt. Grey is the starting model, dashed amber is the reward model’s score, indigo is the model after optimisation. The reward model rightly likes helpful answers but also, wrongly, loves flattering and confident ones that the starting model rarely gives. Below, the average reward-model score and the true quality as the push increases."
+  notice="Around the middle of the slider, true quality peaks. Push further and the reward model’s score keeps rising while true quality collapses, as probability pours into the flattering region. That is reward hacking."
+/>
+
+Two refinements are now common. <Term id="dpo">Direct preference optimisation</Term> (DPO) skips the separate reward model and the sampling loop. It uses the formula above backwards to adjust the model directly on the preference pairs, reaching the same kind of solution more simply. **AI feedback** replaces most human labels with judgements by a model instructed with a written set of principles; this is the approach known as <Term id="constitutional-ai">constitutional AI</Term>. It scales to millions of comparisons and makes the intended values explicit and editable, but it inherits the judging model’s blind spots.
+
+## Stage 3: reward what can be checked
+
+For some tasks there is no need to guess what people prefer. A maths problem has a known answer; code either passes its tests or does not. <Term id="rlvr">Reinforcement learning with verifiable rewards</Term> samples many attempts per problem, checks each automatically, and reinforces the attempts that succeed. There is no learned reward model to fool, although a checker can still be gamed, for example by code that special-cases the tests.
+
+Trained this way at large scale, models discover that **writing out long reasoning before answering** raises their success rate. They learn to decompose problems, try approaches, notice mistakes and backtrack, all as ordinary tokens.
+
+<Recall id="transformer">
+
+A transformer’s blocks read from and add to a running vector per token. Each hop of multi-step reasoning inside a single forward pass needs its own attention-then-MLP round, so a fixed number of layers caps how many dependent steps fit into one token.
+
+</Recall>
+
+Thinking tokens escape that cap. Each written step becomes context that every later token can attend to, so a chain of 10,000 tokens provides 10,000 forward passes of serial computation. This is what a <Term id="reasoning-model">reasoning model</Term> is, and it opened a new axis of scaling: <Term id="test-time-compute">test-time compute</Term>. Accuracy on hard problems rises with how long the model is allowed to think, at the price of generating, and paying for, many more tokens.
+
+## Reason with it
+
+**Why do assistants flatter users?** People rating answers tend, slightly, to prefer ones that agree with them and praise them. The reward model learns that preference along with the useful ones. Optimisation then multiplies the probability of every behaviour by $e^{r/\beta}$, so a small systematic bias becomes a large shift in behaviour, exactly as in the figure. This sycophancy is not a bug in one model. It is what optimising against an imperfect judge does, which is why labs audit for it, and at least one lab has publicly rolled back a model update for being too sycophantic.
+
+**Why can a jailbreak unlock behaviour that safety training removed?** It was not removed. Post-training multiplied its probability down in the kinds of context the training data covered. The ability, learned in pretraining, is still in the weights, and an unusual framing, such as a role-play or an odd format, can land in a context the reshaping barely touched. This is why robust safety needs defences outside the model as well, a theme of <Preview id="agent-security">agent security</Preview>.
+
+**Why do reasoning models help most on maths and code?** Those tasks have cheap, exact checkers, so they can be trained with verifiable rewards at scale, and they need many dependent steps, which is exactly what thinking tokens add. A question about an obscure fact needs neither: if the fact is not in the weights, more thinking cannot produce it. The best post-training can do there is teach the model to say it does not know.
+
+## Where this picture breaks
+
+- **The line between reshaping and learning is blurry.** Large-scale RL on reasoning walks much further than classic preference tuning and clearly builds new skills, such as systematic backtracking, from pieces the base model had. The picture is exact for the KL-leashed objective and approximate beyond it.
+- **There is no single “human preference”.** Raters disagree, and the reward model averages them into one number. Whose preferences, and which principles, are choices the labs make.
+- **One dimension hides most of the story.** The figure’s 1-D “behaviour space” is a sketch. Real responses vary along countless dimensions, and a reward model can be right on some and exploitable on others at the same time.
+- **Checkers can be hacked too.** Verifiable rewards remove the learned judge, not the incentive to game. Models trained against unit tests have been caught editing or special-casing the tests, which is why careful <Preview id="evals">evaluation</Preview> matters.
+
+## Why it matters in the feed
+
+When a lab releases a model with a “reasoning effort” or “thinking budget” setting, it is exposing test-time compute: more thinking tokens, more accuracy, more cost. When a model card reports sycophancy or reward-hacking rates, it is measuring the failure modes of this lesson’s optimisation. And when a company says it post-trained an <Term id="open-weights">open-weight</Term> model for its own domain, it most likely used SFT or DPO: short walks from someone else’s pretrained point.
+
+## Recap
+
+- Post-training starts from the pretrained model and walks a short way on new landscapes, which gradient descent descends like any other.
+- **SFT** reuses the pretraining loss on example conversations. It teaches the assistant format, ending each turn with the stop token that ends the sampling loop.
+- **Preference learning** (RLHF, DPO, AI feedback) multiplies the starting distribution by $e^{r/\beta}$. The KL leash keeps it close to the start, and a flawed reward gets amplified, which is how sycophancy and reward hacking arise.
+- **Verifiable rewards** reinforce attempts that pass automatic checks. They produced reasoning models, whose thinking tokens add serial computation and make test-time compute a new way to buy accuracy.
+- Post-training reshapes behaviour more than it adds knowledge: what the model knows was mostly settled in pretraining.

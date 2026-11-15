@@ -1,0 +1,190 @@
+---
+id: transformer
+title: The transformer
+summary: How embeddings, attention and MLPs assemble into a language model. Each token carries a running vector, the residual stream; every block reads from it and adds to it. Attention moves information between tokens, the MLP processes each token alone, and depth is repeated refinement.
+minutes: 12
+model: meaning-is-geometry
+buildsOn: [attention, forward-pass, embeddings]
+related: [vectors, backpropagation, pretraining, inference, gpu]
+keywords: ["transformer", "transformer architecture", "residual stream", "layer norm", "RMSNorm", "positional encoding", "RoPE", "decoder-only", "mixture of experts", "hidden size"]
+quiz:
+  - question: Researchers delete one block from the middle of a trained 40-block transformer. The model gets a little worse but still writes fluent text. Why is this much less damaging than deleting a layer from a plain deep MLP?
+    options:
+      - Transformers store a backup copy of every layer
+      - Each block only adds a change to the residual stream, so removing one removes one contribution while the stream itself still flows from the embeddings to the output
+      - Attention layers can do the MLP’s job
+      - The deleted block was never trained
+    answer: 1
+    explanation: In a plain MLP each layer replaces its input with a new set of coordinates, so every later layer depends on that exact transformation. In a transformer the running vector is x plus the sum of every block’s additions. Deleting a block subtracts one term; later blocks still read a vector in the same space, only missing one refinement.
+  - question: To answer “The Eiffel Tower is located in the city of”, the model must predict “Paris” at the last position. Which sequence of operations must happen, at minimum?
+    options:
+      - The MLP at the last position alone can do it, because it sees the whole prompt
+      - Attention must move information about “Eiffel Tower” into the last token’s residual stream; then MLPs (at that position, in that or later layers) can map it to “Paris”
+      - The embedding of “of” already contains “Paris”
+      - Attention alone retrieves “Paris” from the embedding table
+    answer: 1
+    explanation: MLPs work on one token’s vector at a time, so they can only use what is already in that token’s stream. The only route from the “Eiffel Tower” positions to the last position is attention. Once the information has been moved there, MLP blocks can turn it into a direction that the output layer reads as “Paris”.
+  - question: With rotary position embeddings, queries and keys are rotated by angles proportional to their positions. What does the dot product between a query at position 100 and a key at position 95 depend on?
+    options:
+      - Only on the absolute positions 100 and 95
+      - On the contents of the two vectors and the offset of 5 positions, but not on where in the text the pair sits
+      - Only on the contents; position is lost
+      - Only on the offset; contents are lost
+    answer: 1
+    explanation: Rotating both vectors by the same extra angle leaves their dot product unchanged, so what survives is the rotation difference, which depends on 100 − 95 = 5. The pair at positions 1,005 and 1,000 gives the same score. Attention therefore sees relative position, combined with content.
+  - question: You double a model’s width d and keep the number of layers. Roughly what happens to the parameters in its blocks and to the FLOPs per token?
+    options:
+      - Both double
+      - Both roughly quadruple, because every block holds about 12·d² weights and the forward pass costs about 2 FLOPs per weight
+      - Parameters quadruple, FLOPs stay the same
+      - Only the embedding table grows
+    answer: 1
+    explanation: Each block’s matrices are d × d or d × 4d, so their size scales with d². The forward pass uses each weight once per token (2 FLOPs), so cost follows parameters. Depth scales both linearly, width quadratically.
+---
+
+The previous two lessons gave us the parts. Embeddings turn tokens into vectors. Attention lets tokens read from each other. And from the forward pass we have the MLP, which reshapes a vector by moving and folding it. A **<Term id="transformer">transformer</Term>** is the arrangement that turns these parts into a language model, and it is remarkably simple: one pair of blocks, repeated dozens of times, around a shared vector per token.
+
+Nearly every large language model you read about is a transformer. A model card that says “80 layers, hidden size 8,192, 64 heads, RoPE, 128k context” is a complete description of the layout in this lesson. By the end you will be able to read it, and count roughly how many parameters it implies.
+
+## The picture
+
+Give every token position its own **running vector**, of width $d$. It starts as the token’s embedding and flows through the whole model. This is the <Term id="residual-stream">residual stream</Term>: a shared workspace. The blocks along the way never replace it. Each one **reads** the current vector, computes something, and **adds** its result back.
+
+Two kinds of block alternate:
+- **Attention** is the only place tokens interact. It reads from earlier tokens’ streams and writes into this one.
+- **MLP** blocks work on each token’s stream alone, like the networks of the forward-pass lesson.
+
+After the last block, each position’s final vector is turned into a prediction of the next token.
+
+<Figure
+  name="residual-stream"
+  title="The residual stream: read, compute, add"
+  caption="Each token has a lane: its running vector, shown as the strip beneath the lane after every write. Attention bands pass information from earlier lanes to later ones; MLP boxes work on one lane at a time. Every block adds its output back (⊕). The last lane’s final vector predicts the next token."
+  notice="The strips change only a little at each ⊕. Blocks add refinements to the vector; they do not overwrite it. Information only ever flows down, from earlier tokens to later ones."
+/>
+
+<KeyIdea>
+
+A transformer is a stack of blocks around one running vector per token. Attention moves information between tokens; the MLP processes each token on its own; each block adds its result to the stream. Depth is repeated refinement of each token’s point in meaning-space, until the last token’s vector points at a good next token.
+
+</KeyIdea>
+
+## Inside a block
+
+A block (a <Term id="transformer-block">transformer block</Term>, or layer) does two updates:
+
+$$
+\mathbf{x} \leftarrow \mathbf{x} + \operatorname{Attn}\big(\operatorname{Norm}(\mathbf{x})\big), \qquad
+\mathbf{x} \leftarrow \mathbf{x} + \operatorname{MLP}\big(\operatorname{Norm}(\mathbf{x})\big)
+$$
+
+Read each term against the picture.
+
+<Recall id="attention">
+
+Each token projects its vector into a query, a key and a value. It scores every earlier token by query · key, turns the scores into weights with softmax, and outputs the weighted mix of their values. Several heads do this in parallel, each in its own subspace.
+
+</Recall>
+
+**Attention** gathers. Its output for a token is a blend of what other tokens’ values carry, projected back to width $d$. It is where “it” picks up information about “animal”, and where the last token collects everything it needs from the prompt.
+
+<Recall id="forward-pass">
+
+An MLP applies move-then-fold steps: a matrix transforms the space, an activation folds it. In a transformer the MLP expands from width $d$ to about $4d$, folds, and projects back to $d$. It costs about 2 FLOPs per weight per token.
+
+</Recall>
+
+**The MLP** transforms. It sees one token’s vector and nothing else, so it can only work with what attention has already brought there. The two roles are complementary. Attention’s output is a weighted average, so it moves and mixes information but does little non-linear processing; the MLP is where each token’s vector is reshaped. Experiments that locate and edit facts in trained models often find them concentrated in MLP weights.
+
+**The norm** keeps the scale under control. Before a block reads the stream, <Term id="layer-norm">layer normalisation</Term> rescales the token’s vector to a standard size. That is useful because dozens of blocks keep adding to the same vector, and its length would otherwise drift. It also fits the geometry of this path: the block responds to the *direction* of the vector, which is where the meaning is.
+
+### Why add instead of replace?
+
+The residual connection, the “$\mathbf{x} +$”, looks like a detail. It is the reason transformers can be deep.
+
+- **Each block only has to learn a change.** Doing nothing is the default: a block whose output is zero leaves the stream untouched. So a new block starts out harmless and learns a useful refinement.
+- **Everything stays readable.** Every block writes into the same space, so a block near the top can read a direction written by a block near the bottom. The stream holds many features at once, as the directions we met in the embeddings lesson.
+- **Gradients have a highway.**
+
+<Recall id="backpropagation">
+
+Backpropagation sends the gradient of the loss backwards through the network with the chain rule, multiplying by each layer’s local derivative. Through many layers, those products can shrink toward zero.
+
+</Recall>
+
+The derivative of $\mathbf{x} + f(\mathbf{x})$ with respect to $\mathbf{x}$ is the identity plus $f$’s derivative. The identity part passes the gradient through the addition unchanged, so the signal has a direct path to the earliest layers of a hundred-layer model instead of being multiplied down at every block.
+
+## Where am I? Positional encoding
+
+<Recall id="embeddings">
+
+An embedding is a token’s learned vector, the same wherever the token appears. It carries no information about where the token is.
+
+</Recall>
+
+Attention compares contents only, so on its own it cannot tell “dog bites man” from “man bites dog”. Position has to be put into the geometry; this is <Term id="positional-encoding">positional encoding</Term>. Early transformers added a learned “position vector” to each embedding. Most current models use <Term id="rope">rotary position embeddings</Term> (RoPE), which have a clean geometric reading.
+
+<Recall id="vectors">
+
+The dot product depends only on the lengths of two vectors and the angle between them. Rotating both vectors by the same angle leaves it unchanged.
+
+</Recall>
+
+RoPE splits each query and key into many 2-D pairs of coordinates and **rotates** each pair by an angle proportional to the token’s position, fast in some pairs and slow in others. When a query at position 100 meets a key at position 95, both have been rotated, and their dot product depends only on the difference in rotation: an offset of 5 positions. Attention therefore sees content plus **relative** position, the same at the start of a book as at the end of it. Fast-rotating pairs distinguish neighbouring positions; slow ones track distances of thousands of tokens.
+
+## Counting the parameters
+
+<Example title="one block, and three real models">
+
+For the classic block:
+- **Attention:** $W_Q$, $W_K$, $W_V$ and $W_O$, each $d \times d$ across all heads: $4d^2$.
+- **MLP:** $d \to 4d$ and $4d \to d$: $2 \times 4d^2 = 8d^2$.
+- **Total:** $12d^2$ per block. At $d = 4{,}096$, that is 201 million.
+
+Add one embedding table of $V \times d$, shared with the output layer:
+
+| model | $d$ | layers | blocks $12d^2 L$ | embeddings $Vd$ | total |
+|---|---|---|---|---|---|
+| GPT-2 small | 768 | 12 | 85M | 39M ($V$ = 50,257) | ≈ 124M |
+| GPT-3 | 12,288 | 96 | 174B | 0.6B | ≈ 175B |
+
+Modern models vary the recipe but not the arithmetic. An 8B-class model with $d = 4{,}096$ and 32 layers shares keys and values across groups of heads (attention: 42M per block) and uses a gated MLP with three $4{,}096 \times 14{,}336$ matrices (176M per block). That is 218M per block, 6.98B across 32 blocks. Separate input and output tables of $128{,}256 \times 4{,}096$ add 1.05B, for **8.03B** in total.
+
+The forward pass costs about 2 FLOPs per parameter per token, so this model does about 16 GFLOP of weight arithmetic per token, plus attention work that grows with the context.
+
+</Example>
+
+<Figure
+  name="transformer-param-count"
+  interactive
+  title="Where the parameters live"
+  caption="Choose a width, a depth and a vocabulary. The bar splits the parameters into attention, MLP and the embedding table; the readout converts them into FLOPs per token and memory."
+  notice="Double the width and the blocks’ share quadruples; double the layers and it only doubles. In small models the embedding table is a large share; in big ones it almost vanishes."
+/>
+
+## Reason with it
+
+**Why can a trained transformer lose a middle block and still work?** Because of the picture: the final vector is the embedding plus the sum of every block’s additions. Removing a block removes one term. Later blocks still read vectors in the same space, just less refined. A plain MLP, where each layer re-describes its input in new coordinates, breaks when any layer goes missing. Experiments that drop layers from trained models confirm this, especially for middle layers.
+
+**Why does multi-step reasoning in a single token need depth?** Take “The capital of the country where the Eiffel Tower stands is”. Attention must first move “Eiffel Tower” to a later position; an MLP must turn it into “France”; attention in a later layer must move that where it is needed; another MLP must turn it into “Paris”. Each hop needs at least one attention-then-MLP round, so a fixed number of layers caps how many dependent steps fit into one forward pass. One way around this is to let the model write intermediate steps as tokens, so later tokens can attend to them. That is the idea behind <Preview id="post-training">reasoning models</Preview>.
+
+**Why does a model trained on 8,000-token texts fail on 100,000-token inputs unless it is adapted?** With RoPE, attention sees relative offsets as rotation angles. The slowly rotating pairs have never produced the angles that correspond to offsets beyond 8,000, so queries and keys meet in configurations training never shaped. Long-context extension methods rescale those rotation frequencies so large offsets map onto familiar angles, then fine-tune briefly on long texts.
+
+## Where this picture breaks
+
+- **The workspace is crowded.** The stream has $d$ dimensions but carries far more features than that, as nearly-perpendicular directions that interfere a little. Blocks do not write into tidy reserved slots, which is why reading a model’s internals is a research field of its own.
+- **Norms and non-linearities complicate “just adding”.** Each block reads a normalised vector, so a large write by one block can change how much later blocks notice others. The additive picture holds exactly for the stream itself, and only approximately for what blocks see.
+- **Many models replace the MLP with experts.** In a <Term id="mixture-of-experts">mixture-of-experts</Term> model, a small router sends each token to a few of many MLPs. Total parameters then far exceed the parameters used per token, and the 2 × parameters rule must use the active ones.
+- **This is the decoder-only transformer.** The original design also had an encoder that reads the whole input without a causal mask, as translation and search models still do. Chat models are almost all decoder-only.
+
+## Why it matters in the feed
+
+When a model card lists hidden size, layers and heads, you can now estimate its parameter count and its cost per token. When a lab announces a mixture-of-experts model with “400B total, 17B active parameters”, the second number tells you the per-token compute. When a release extends a context window from 8k to 128k tokens, RoPE rescaling is usually part of how. And when interpretability papers talk about “features in the residual stream”, they mean directions in the shared workspace of this lesson.
+
+## Recap
+
+- Each token carries a running vector, the **residual stream**. It starts as the token’s embedding, and every block reads from it and adds to it.
+- **Attention** (from the attention lesson) moves information between tokens, earlier to later. The **MLP** (from the forward-pass lesson) processes each token alone.
+- Layer norm keeps the stream’s scale steady; residual additions let each block learn a small change and give backpropagation an unobstructed path.
+- **RoPE** rotates queries and keys by position, so their dot product, the alignment of the vectors lesson, depends on relative position.
+- Parameters are about $12d^2$ per block plus $Vd$ for the embeddings, and the forward pass costs about 2 FLOPs per parameter per token.

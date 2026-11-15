@@ -1,0 +1,135 @@
+---
+id: cpu
+title: The CPU and the cost of data
+summary: What a processor core does every clock cycle, and why most of a CPU is machinery for getting instructions and data to a small amount of arithmetic. It sets up the picture for this whole path. Arithmetic is cheap; getting data to it is what costs.
+minutes: 11
+model: feeding-the-math
+buildsOn: []
+related: [gpu, memory-wall, hosting, matrices]
+keywords: ["CPU", "x86", "Arm-based", "processor cores", "CPU cache", "branch prediction", "clock speed", "instruction set", "RISC-V", "server CPU"]
+quiz:
+  - question: A program follows a linked list of 10 million nodes scattered across main memory. You move it from a 4 GHz CPU to an otherwise identical 5 GHz CPU. Roughly how much faster does it run?
+    options:
+      - 25% faster, because the clock is 25% faster
+      - Barely faster at all
+      - About twice as fast, because of the larger cache
+      - Slower, because the pipeline is deeper
+    answer: 1
+    explanation: Each hop must wait for the previous node's address to come back from DRAM, about 90 ns, before it can start the next load. That wait is set by the memory, not by the clock. A faster clock just spends more idle cycles waiting. The arithmetic per hop was never the bottleneck.
+  - question: Two loops perform the same 100 million additions over the same numbers. One reads them from a contiguous array; the other reaches each number by following a pointer stored in the previous one. Which is faster, and by roughly how much?
+    options:
+      - They take the same time, since the arithmetic is identical
+      - The array loop, by roughly a thousand times or more, because it streams whole cache lines at full bandwidth while the pointer loop waits a full memory latency per number
+      - The pointer loop, because pointers are cached
+      - The array loop, but only by about 10%
+    answer: 1
+    explanation: The array scan uses every byte of each 64-byte cache line, the prefetcher can fetch ahead, and many loads overlap. It moves 400 MB at around 80 GB/s, about 5 ms. The pointer chase cannot start the next load until the current one returns, so it pays about 90 ns per number, about 9 s in total. The two loops do the same additions but move data in very different ways.
+  - question: A chip designer lengthens a pipeline from 5 stages to 20 so the clock can run faster. What happens to the cost of a mispredicted branch?
+    options:
+      - It stays the same, because the predictor is unchanged
+      - It disappears, because more stages hide it
+      - It grows, because more instructions fetched on the wrong guess are in flight and must be thrown away before the correct path can refill the pipeline
+      - It only matters for floating-point code
+    answer: 2
+    explanation: The branch outcome is known only when the branch reaches the execute stage. Every stage in front of that is holding work fetched on the guess. In a deeper pipeline more of that work is discarded, and more cycles pass before the correct path reaches the end, so a wrong guess costs about as many cycles as there are stages before execute.
+  - question: Summing a 4 GB array takes 50 ms on 8 cores. You rerun it on 16 cores of the same design sharing the same memory. What do you expect?
+    options:
+      - About 25 ms, because the work splits evenly
+      - Close to 50 ms, because the sum was already limited by memory bandwidth, which the cores share
+      - About 100 ms, because of contention
+      - About 3 ms, because each core's cache holds part of the array
+    answer: 1
+    explanation: The arithmetic for a billion additions takes only a couple of milliseconds on 8 cores. The 50 ms is the time to stream 4 GB through a memory system that delivers about 80 GB/s. Extra cores add arithmetic, which was never the scarce resource, while bandwidth stays the same.
+---
+
+Every chip in this path, from the processor in a laptop to the racks of accelerators in a gigawatt data center, does the same basic job. It takes numbers, does arithmetic on them, and stores the results. The surprise, and the key to everything that follows, is that **the arithmetic is the easy part**. A modern core adds two numbers in a fraction of a nanosecond. Fetching one of those numbers from main memory takes hundreds of times longer, and costs far more energy.
+
+This lesson opens up the CPU to see where its time and its silicon actually go. Once you see that, three things make sense: why CPUs look the way they do, why they are the wrong shape for AI, and why the rest of this path keeps asking the same question: *what runs out first?*
+
+## The picture
+
+A CPU core runs one stream of instructions, a program, as fast as it can. The loop is always the same. The core **fetches** the next instruction from the address in its program counter, **decodes** it to work out what it asks for, **executes** it on an arithmetic unit using values held in a handful of registers, and **writes** the result back. At 4 GHz, one <Term id="clock-cycle">clock cycle</Term> lasts 0.25 ns.
+
+The arithmetic unit is tiny and fast. The problem is everything it needs: the next instruction, and the data that instruction names. Those live in main memory, **DRAM**, which answers a request in roughly 90 ns. That is about **350 cycles** in which the arithmetic unit has nothing to do. Energy tells the same story. Measurements on an older (45 nm) process found that reading a 32-bit number from DRAM cost more than a hundred times the energy of multiplying two of them.
+
+So a CPU core is a small amount of arithmetic surrounded by a large amount of machinery that exists to keep it busy. Its main tool is a <Term id="memory-hierarchy">memory hierarchy</Term>: small, fast memories close to the core that hold copies of recently used data.
+
+<Figure
+  name="cache-hierarchy"
+  title="How long the core waits, level by level"
+  caption="All five requests start together on one time axis. An add finishes in a cycle; data from the L1 cache arrives in a few; data from DRAM takes about 350 cycles, the whole width of the figure."
+  notice="The first bars are barely visible on this scale. On a linear time axis, a trip to main memory dwarfs everything the core does with the data once it arrives."
+/>
+
+<KeyIdea>
+
+**Arithmetic is cheap; getting data to it is what costs.** A CPU spends most of its silicon, and most of its design effort, on hiding the distance between its arithmetic units and memory: caches, prediction, and running ahead. Every chip in this path is a different answer to the same problem.
+
+</KeyIdea>
+
+## Keeping the core busy: pipelines and prediction
+
+The first trick is to overlap instructions. Fetch, decode, execute and write use different circuits, so while one instruction executes, the next can be decoding and the one after that fetching. This is <Term id="pipelining">pipelining</Term>. Each instruction still takes several cycles from start to finish, but once the pipeline is full **one instruction completes every cycle**.
+
+Pipelines break when the core does not know what comes next. A **branch** ("if x > 0, jump there") is only resolved when it executes, several stages after the instructions behind it should already have been fetched. Waiting would leave the pipeline empty. So the core uses <Term id="branch-prediction">branch prediction</Term>: it guesses from the branch's past behaviour, keeps fetching down the guessed path, and throws that work away if the guess was wrong.
+
+<Figure
+  name="cpu-pipeline"
+  title="A pipeline, and what a wrong guess costs"
+  caption="Each column is one clock cycle. Instructions overlap, each one stage behind the last. The branch I3 is resolved when it executes in cycle 5; the core had guessed wrong, so the two instructions it fetched on that guess are discarded and fetching restarts at the right place."
+  notice="The row of ticks at the bottom: one instruction finishes every cycle until the flush, then nothing finishes in cycles 8 and 9."
+/>
+
+Real cores go much further than the figure. They have 15 to 20 stages, so a wrong guess costs 15 to 20 cycles, and predictors are right well over 95% of the time on typical code. They are **superscalar**, decoding four to eight instructions per cycle. And they execute **out of order**: a core keeps a few hundred instructions in flight and runs whichever ones have their inputs ready. So when one instruction waits on memory, independent work behind it can go ahead.
+
+All of this machinery serves one goal: to make a *single* thread of instructions finish as soon as possible. That is the right goal for the work CPUs were built for (operating systems, browsers, databases, compilers), which is full of branches, pointer-following and decisions that depend on the last result.
+
+## Caches: betting on locality
+
+A <Term id="cpu-cache">cache</Term> keeps copies of recently used memory in fast on-chip storage. A modern core has three levels: a private L1 of a few tens of kilobytes that answers in about 4 cycles, a private L2 of 1 to 2 MB (about 14 cycles), and an L3 of tens of megabytes shared by many cores (about 50 cycles). Behind them sits <Term id="dram">DRAM</Term>, with tens to hundreds of gigabytes, at about 350 cycles.
+
+Caches only help if programs reuse data, and they bet on two habits, together called <Term id="locality">locality</Term>:
+- **Temporal locality.** Data used now is likely to be used again soon, so keep it.
+- **Spatial locality.** Data next to what was used is likely to be used next. So memory moves in whole **cache lines** of 64 bytes, and hardware prefetchers fetch the following lines before they are asked for.
+
+It helps to keep two properties of memory apart. **Latency** is how long a single request takes, about 90 ns for DRAM. **Bandwidth** is how many bytes per second arrive when many requests are in flight at once, around 80 GB/s for a desktop with two DDR5 channels. A program that knows its next address in advance can have many requests in flight, so it is limited by bandwidth. A program that learns the next address only from the data it just loaded pays the full latency every time.
+
+<Example title="same additions, about 2,000 times apart">
+
+Add up 100 million 4-byte numbers on a 4 GHz desktop.
+
+- **Stored as an array.** The core streams 400 MB. Every byte of every cache line is used and the prefetcher runs ahead, so the limit is bandwidth: 400 MB ÷ 80 GB/s ≈ **5 ms**. The additions themselves are faster still. One core adds 16 numbers per instruction with its vector unit (see below), so $10^8$ additions take about 1.6 ms on one core and 0.2 ms on eight. Even the simplest loop is waiting on memory.
+- **Stored as a linked list** scattered around memory, each node holding a number and the address of the next. The next load cannot start until the current one returns its address, so each node costs a full DRAM latency: $10^8 \times 90$ ns ≈ **9 s**.
+
+The additions are identical in both cases. The difference is entirely in how data moves: about 1,800 times.
+
+</Example>
+
+Arithmetic did get wider. A modern core has <Term id="simd">SIMD</Term> vector units, in which one instruction applies the same operation to 8 or 16 numbers at once (AVX2 and AVX-512 on x86, NEON and SVE on Arm). A desktop CPU with 8 cores reaches around a trillion 32-bit floating-point operations per second. But it can only feed that from DRAM at about 80 GB/s, 20 billion 4-byte numbers per second. To keep the arithmetic busy, each number fetched from memory must be used about fifty times. Hold on to that ratio of operations to bytes; it is the central quantity of <Preview id="memory-wall">the memory wall</Preview>.
+
+## Reason with it
+
+**Why doesn't a faster clock make a database proportionally faster?** Much of a database's time is spent following pointers through indexes and tables too large for the caches. Each miss waits about 90 ns, and that time is set by DRAM, not by the core's clock. At a higher clock the core simply idles for more cycles per miss. This is also why clock speeds have stayed in the 3–6 GHz range for two decades: once power density limited clocks, designers spent transistors on bigger caches, more cores and wider vectors instead.
+
+**Why can the loop order of a matrix multiply change its speed tenfold?** Multiply two 4,096 × 4,096 matrices stored row by row. A naive loop walks *down* a column of the second matrix. Each step jumps 16 KB ahead, touching a fresh 64-byte line and using just 4 bytes of it, and the column is gone from L1 before it is needed again. Reorder the work into **tiles**, say 64 × 64 blocks of 16 KB each, and three tiles (48 KB) fit comfortably in the core's L2 cache. Every number brought in is then reused 64 times before it is evicted. The arithmetic is the same; the traffic falls by more than an order of magnitude, and the speed often rises tenfold or more. Matrix multiplication *can* reuse data heavily, and that property is why it runs so well on the chips in the <Preview id="gpu">next lesson</Preview>.
+
+**What limits how fast a laptop can run a chatbot?** Generating each token uses every weight of the model once. A 7-billion-parameter model squeezed to 4 bits per weight is about 3.5 GB. Before it can produce a token, the laptop must stream all of it from memory. At 100 GB/s that is at least 35 ms, so the ceiling is about 28 tokens per second, whatever the core count. Laptops with much higher memory bandwidth run the same model proportionally faster (more in <Preview id="hosting">hosting</Preview>).
+
+## Where this picture breaks
+
+- **Latency is not the whole story.** Cores keep dozens of cache misses in flight at once, and prefetchers hide latency for predictable access patterns. A streaming program is limited by bandwidth, not by 90 ns per access. The pointer-chasing example is the worst case, not the typical one.
+- **Many cores share one memory.** Cores have private L1 and L2 caches but share L3 and DRAM bandwidth. Adding cores adds arithmetic, not bandwidth, so a memory-bound program stops speeding up once the memory is saturated.
+- **The numbers vary.** The latencies here are typical of recent desktop and server cores. Server chips with a hundred or more cores have larger caches and more memory channels, and Apple-style laptop chips put memory in the same package for much higher bandwidth. The ratios, not the exact cycle counts, are what carry over.
+- **Energy is part of the cost.** We counted time. Moving data also costs energy, and heat is what limits how much of a chip can run at once. That thread returns in <Preview id="energy">energy</Preview>.
+
+## Why it matters in the feed
+
+When you read about Arm-based server CPUs from cloud providers, core-count races, or chips that pair a CPU with GPUs over a fast link, read them through this lesson. In an AI server, the CPU is the host. It runs the operating system, loads and tokenises data, launches work on the accelerators and manages the network. It rarely does the heavy math, but a slow host can starve expensive accelerators. "AI PCs" that add a neural processing unit to a laptop chip are the same story at small scale: specialised arithmetic, still limited by how fast memory can feed it.
+
+## Recap
+
+- A core runs one instruction stream through **fetch, decode, execute, write**, overlapped in a pipeline so that one instruction completes per cycle.
+- **Branch prediction** and out-of-order execution keep the pipeline full by guessing and running ahead. A wrong guess costs about the pipeline depth in cycles.
+- The **memory hierarchy** exists because DRAM is about 350 cycles away. Caches bet on locality, and data moves in 64-byte lines.
+- **Latency** (time per request) and **bandwidth** (bytes per second) are different limits. The same arithmetic can differ in speed by a thousandfold depending on how its data moves.
+- The picture for this path: **arithmetic is cheap; getting data to it is what costs.** CPUs spend their silicon on making one thread fast despite that. The next chip makes the opposite choice.

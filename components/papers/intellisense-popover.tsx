@@ -1,33 +1,46 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { X, MessageSquare, Loader2 } from "lucide-react";
+import { readBillingDenial, UpgradeNotice, type BillingDenial } from "@/components/billing/upgrade-notice";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import type { Citation } from "@/lib/rag/types";
+import { SketchCorner, SketchFrame, SketchWedge } from "@/components/sketch";
+import { CitedText, SourceList, citedIdsIn } from "./citations";
+import { ChatIcon, CloseIcon, PencilSpinner } from "./sketch-icons";
 
 interface IntellisensePopoverProps {
   text: string;
   position: { x: number; y: number };
   paperId: string;
+  /** Paragraph the selection was made in; improves retrieval and the explanation */
+  surroundingText?: string;
   onClose: () => void;
   onAskFollowUp?: (text: string, explanation: string) => void;
+  /** Scroll the paper to a cited passage */
+  onNavigateToSource?: (citation: Citation) => void;
 }
 
 export function IntellisensePopover({
   text,
   position,
   paperId,
+  surroundingText,
   onClose,
   onAskFollowUp,
+  onNavigateToSource,
 }: IntellisensePopoverProps) {
   const [explanation, setExplanation] = useState("");
+  const [citations, setCitations] = useState<Citation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [denial, setDenial] = useState<BillingDenial | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // Fetch explanation on mount
-    fetchExplanation();
+    // Fetch explanation on mount. Abort on unmount so a remount (e.g. React
+    // Strict Mode in development) doesn't stream two explanations into one.
+    const controller = new AbortController();
+    fetchExplanation(controller.signal);
 
     // Handle Escape key to close
     const handleEscape = (e: KeyboardEvent) => {
@@ -37,7 +50,10 @@ export function IntellisensePopover({
     };
 
     document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
+    return () => {
+      controller.abort();
+      document.removeEventListener("keydown", handleEscape);
+    };
   }, []);
 
   // Handle click outside to close
@@ -61,20 +77,29 @@ export function IntellisensePopover({
     };
   }, [onClose]);
 
-  const fetchExplanation = async () => {
+  const fetchExplanation = async (signal: AbortSignal) => {
     try {
       setLoading(true);
       setError(null);
+      setDenial(null);
       setExplanation("");
+      setCitations([]);
 
       const response = await fetch(`/api/papers/${paperId}/explain`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, surroundingText }),
+        signal,
       });
 
+      const billingDenial = await readBillingDenial(response);
+      if (billingDenial) {
+        setDenial(billingDenial);
+        setLoading(false);
+        return;
+      }
       if (!response.ok) {
         throw new Error("Failed to fetch explanation");
       }
@@ -113,6 +138,9 @@ export function IntellisensePopover({
                 setLoading(false);
                 return;
               }
+              if (Array.isArray(parsed.citations)) {
+                setCitations(parsed.citations);
+              }
               if (parsed.chunk) {
                 setExplanation((prev) => prev + parsed.chunk);
               }
@@ -125,6 +153,7 @@ export function IntellisensePopover({
 
       setLoading(false);
     } catch (err) {
+      if (signal.aborted) return;
       console.error("Error fetching explanation:", err);
       setError("Explanation unavailable. Try the Deep Dive panel for more help.");
       setLoading(false);
@@ -143,9 +172,9 @@ export function IntellisensePopover({
     position: "fixed",
     left: `${position.x}px`,
     top: `${position.y - 8}px`, // 8px above the selection
-    transform: "translate(-50%, -100%)",
+    transform: "translate(-50%, -100%) rotate(-0.4deg)",
     zIndex: 50,
-    maxWidth: "400px",
+    maxWidth: "420px",
     width: "max-content",
     minWidth: "280px",
   };
@@ -153,41 +182,44 @@ export function IntellisensePopover({
   return (
     <div
       ref={popoverRef}
-      className="bg-white rounded-md border border-slate-200 shadow-lg"
+      className="sk-card shadow-[7px_7px_0_-1px_rgba(34,37,46,0.12)]"
       style={popoverStyle}
       role="dialog"
       aria-label="Intellisense explanation"
     >
+      <SketchFrame seed={`explain:${text.slice(0, 40)}`} w={420} h={300} />
+      <SketchCorner seed={`explain:${text.slice(0, 40)}:c`} delay={0.5} />
+      <SketchWedge seed={`explain:${text.slice(0, 40)}:w`} />
+
       {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-slate-200">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-900 truncate">
-            {text}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 ml-2 flex-shrink-0"
+      <div className="relative flex items-start gap-2 px-[18px] pt-4">
+        <p className="flex-1 min-w-0 font-hand text-[22px] font-bold leading-tight truncate">
+          “{text}”
+        </p>
+        <button
+          type="button"
+          className="sk-icon -mr-2.5 -mt-2.5"
           onClick={onClose}
           aria-label="Close explanation"
         >
-          <X className="h-4 w-4" />
-        </Button>
+          <CloseIcon />
+        </button>
       </div>
 
       {/* Content */}
-      <div className="p-4 max-h-64 overflow-y-auto">
+      <div className="relative px-[18px] pb-4 pt-1.5 max-h-80 overflow-y-auto">
         {loading && (
-          <div className="flex items-center gap-2 text-slate-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <p className="text-sm">Generating explanation...</p>
+          <div className="flex items-center gap-2 text-pencil" role="status">
+            <PencilSpinner />
+            <p className="font-hand text-[21px] font-bold">Generating explanation...</p>
           </div>
         )}
 
+        {denial && <UpgradeNotice denial={denial} />}
+
         {error && (
           <div className="space-y-3">
-            <p className="text-sm text-red-600">{error}</p>
+            <p className="text-sm text-pen">{error}</p>
             {onAskFollowUp && (
               <Button
                 variant="outline"
@@ -195,7 +227,7 @@ export function IntellisensePopover({
                 onClick={handleAskFollowUp}
                 className="w-full"
               >
-                <MessageSquare className="h-4 w-4 mr-2" />
+                <ChatIcon />
                 Try Deep Dive Panel
               </Button>
             )}
@@ -204,17 +236,25 @@ export function IntellisensePopover({
 
         {!loading && !error && explanation && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-              {explanation}
-            </p>
+            <CitedText
+              text={explanation}
+              citations={citations}
+              onCitationClick={onNavigateToSource}
+              className="text-[15px] leading-relaxed"
+            />
+            <SourceList
+              citations={citations}
+              citedIds={citedIdsIn(explanation)}
+              onNavigate={onNavigateToSource}
+              compact
+            />
             {onAskFollowUp && (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleAskFollowUp}
-                className="w-full"
               >
-                <MessageSquare className="h-4 w-4 mr-2" />
+                <ChatIcon />
                 Ask follow-up in Deep Dive
               </Button>
             )}
@@ -224,4 +264,3 @@ export function IntellisensePopover({
     </div>
   );
 }
-

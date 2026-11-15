@@ -1,0 +1,178 @@
+---
+id: derivatives
+title: Derivatives & gradients
+summary: The derivative as local sensitivity, the gradient as the uphill arrow on a landscape, and the chain rule as sensitivities multiplying along a chain. Together they tell training which way to nudge every parameter.
+minutes: 11
+model: loss-landscape
+buildsOn: [vectors]
+related: [gradient-descent, backpropagation]
+keywords: ["derivative", "gradient", "chain rule", "partial derivative", "gradient-based", "saliency map", "sensitivity analysis"]
+quiz:
+  - question: At some point a function has slope 3, and its value is 10. What is your best estimate of its value if you move the input 0.01 to the right, and how far can you trust that kind of estimate?
+    options:
+      - 10.03, and only for small moves, because the slope describes the curve's local straight-line behaviour
+      - 13, because the slope is the change per unit
+      - 10.03, and for any size of move, because the slope never changes
+      - It cannot be estimated without the formula
+    answer: 0
+    explanation: The derivative is an exchange rate between a small nudge of the input and the change of the output, so 0.01 × 3 = 0.03. Zoomed in, the curve is its tangent line. Zoomed out, the curve bends away from the tangent, so the same arithmetic for a move of 1 or 2 can be badly wrong.
+  - question: At a point on a landscape the gradient is (3, 4). You take a step of length 0.01. Which step raises the height the most, and by roughly how much?
+    options:
+      - A step along the x-axis, raising it by 0.03
+      - A step in the direction (3, 4), raising it by about 0.05
+      - A step along the contour line, raising it by about 0.05
+      - Every direction raises it by the same amount
+    answer: 1
+    explanation: A small step Δ changes the height by about ∇f · Δ = |∇f| |Δ| cos θ. That is largest when θ = 0, i.e. along the gradient, giving |∇f| × 0.01 = 5 × 0.01 = 0.05. Along the x-axis you only collect the x-slope (0.03). Along the contour, cos θ = 0 and the height does not change.
+  - question: A nudge passes through three stages whose local slopes are 2, 0.1 and 5. How sensitive is the final output to the first input?
+    options:
+      - 7.1, the sum of the slopes
+      - 0.1, the smallest slope, which bottlenecks the chain
+      - 1, the product of the slopes
+      - 5, the largest slope
+    answer: 2
+    explanation: Each stage multiplies whatever nudge arrives by its own slope, so a nudge of ε becomes 2ε, then 0.2ε, then ε again. Sensitivities multiply along a chain, 2 × 0.1 × 5 = 1. Sums appear only when an input reaches the output along several separate paths.
+  - question: Using the dot-product picture from the vectors lesson, why is the gradient always perpendicular to the contour line through a point?
+    options:
+      - Because moving along a contour does not change the height, so the gradient's dot product with that direction is zero, and a zero dot product means perpendicular
+      - Because contour lines are drawn that way by convention
+      - Because the gradient always points at the minimum, which is perpendicular to every contour
+      - It is only perpendicular for circular contours
+    answer: 0
+    explanation: The height change for a small step is the dot product of the gradient with the step. Along a contour the height is constant by definition, so that dot product is zero, which is exactly the condition for orthogonal vectors. This holds for any smooth landscape, not just circles. In the figure it holds even though the gradient does not point at the minimum.
+---
+
+Training a neural network comes down to one question, asked billions of times over: **if I nudge this one number, does the model get better or worse, and by how much?** The answer to that question has a name, the derivative. You do not need the rules of calculus to use it. You need a picture of what it measures and how sensitivities combine, and that picture is what this lesson builds.
+
+It is also the first half of this path's second mental model. The model's parameters are a location on a landscape, and its error is the height. Before we can walk downhill, we need a way to feel which way is down.
+
+## The picture
+
+Picture any function as a landscape: the input is where you stand, the output is the height. Stand at one spot and ask how steep the ground is. That steepness is the <Term id="derivative">derivative</Term>.
+
+The key fact is what happens when you zoom in. Any smooth curve, zoomed in far enough around a point, becomes indistinguishable from a straight line: its **tangent**. This is <Term id="local-linearity">local linearity</Term>, and it is what makes derivatives useful. A straight line is completely described by its slope, so near that point
+
+$$
+\Delta\text{output} \approx \text{slope} \times \Delta\text{input}.
+$$
+
+The derivative is an **exchange rate between nudges**: this much change out per unit of change in. A slope of 3 means a nudge of 0.01 in the input moves the output by about 0.03. A negative slope means the output falls as the input grows. A slope of zero means the ground is flat: small nudges barely matter.
+
+<Figure
+  name="tangent-slope"
+  interactive
+  title="The derivative is the slope of the zoomed-in curve"
+  caption="The amber tangent slides along the curve and its slope is read off live. The inset zooms in 25× around the point, where the curve and the tangent become one line. Below it, the slope's prediction for a nudge of 0.1 is compared with the actual change."
+  notice="The prediction is excellent for a small nudge and gets worse where the curve bends sharply. At the two hollow dots the tangent is flat, so the slope is zero, even though one is a hilltop and the other a valley floor."
+/>
+
+<KeyIdea>
+
+A derivative is a local, linear prediction: how much the output moves per small nudge of the input. It is exact in the limit of tiny nudges and says nothing reliable about big ones. The gradient packages this for many inputs into one arrow pointing uphill, and the chain rule says that sensitivities along a chain of steps multiply.
+
+</KeyIdea>
+
+## Many inputs: partial derivatives and the gradient
+
+A model's loss depends on all its parameters at once. Start with two, so the landscape is a surface over a flat map, drawn as **contour lines** joining points of equal height, like a hiking map.
+
+Walk due east (change only $x$) and you feel one slope. Walk due north (change only $y$) and you feel another. Each of these is a <Term id="partial-derivative">partial derivative</Term>, written $\tfrac{\partial f}{\partial x}$ and $\tfrac{\partial f}{\partial y}$: the slope along one axis with every other input held still. Stack them into a vector and you get the <Term id="gradient">gradient</Term>:
+
+$$
+\nabla f = \left(\frac{\partial f}{\partial x},\ \frac{\partial f}{\partial y}\right).
+$$
+
+With a million inputs, the gradient simply has a million entries, one slope per axis. What makes it more than a list is the next step, which uses the picture from the first lesson of this path.
+
+<Recall id="vectors">
+
+The dot product $\mathbf{a} \cdot \mathbf{b} = \|\mathbf{a}\|\,\|\mathbf{b}\|\cos\theta$ measures how much two vectors point the same way: largest when aligned, zero when perpendicular, negative when opposed.
+
+</Recall>
+
+Take a small step $\Delta = (\Delta x, \Delta y)$ in any direction. Local linearity says each axis contributes its slope times its share of the step, and those contributions add:
+
+$$
+\Delta f \approx \frac{\partial f}{\partial x}\Delta x + \frac{\partial f}{\partial y}\Delta y = \nabla f \cdot \Delta = \|\nabla f\|\,\|\Delta\|\cos\theta.
+$$
+
+The change in height is a **dot product** between the gradient and your step. Everything about the gradient's geometry now follows from how dot products behave, rather than being a fact to memorise:
+- **Steepest ascent.** For a step of fixed length, $\cos\theta$ is largest (1) when you step along $\nabla f$. So the gradient points in the direction of steepest ascent.
+- **Steepness.** Along that direction the height rises at rate $\|\nabla f\|$. The gradient's length *is* how steep the slope is.
+- **Contours.** Walking along a contour line keeps the height fixed, so $\nabla f \cdot \Delta = 0$ there. The gradient is <Term id="orthogonal">orthogonal</Term> to the contour lines.
+- **Steepest descent.** $-\nabla f$ points straight downhill. Training will step that way.
+
+<Figure
+  name="gradient-contour"
+  interactive
+  title="The gradient: an uphill arrow at right angles to the contours"
+  caption="An elongated bowl, f(x, y) = x²/2 + 2y², seen from above. Drag the dot. The amber arrow is the gradient; the pale amber legs are its two partial slopes, east and north. The black segment follows the contour through the dot."
+  notice="The arrow always meets the contour at a right angle. The dashed green line to the lowest point usually does not line up with the downhill direction."
+/>
+
+<Example title="reading the gradient at one point">
+
+Take the bowl in the figure, $f(x, y) = \tfrac{x^2}{2} + 2y^2$, at the point $(2, 1)$. Its height is $2 + 2 = 4$.
+
+- Walking east, the slope is $\tfrac{\partial f}{\partial x} = x = 2$. Walking north, it is $\tfrac{\partial f}{\partial y} = 4y = 4$. So $\nabla f = (2, 4)$, with length $\sqrt{4 + 16} \approx 4.47$.
+- A step of length 0.01 **along the gradient** should raise the height by about $4.47 \times 0.01 = 0.0447$. The exact change is 0.0449.
+- The same step **due east** collects only the east slope: $2 \times 0.01 = 0.02$ (exactly 0.02005).
+- The same step **along the contour**, direction $(-4, 2)$, has $\nabla f \cdot \Delta = 0$. The exact change is 0.00008, which is second-order small.
+
+Now look downhill: $-\nabla f = (-2, -4)$. The lowest point is at the origin, in direction $(-2, -1)$. The cosine between them is $\tfrac{4 + 4}{\sqrt{20}\,\sqrt{5}} = 0.8$, an angle of about **37°**. The steepest way down is not the way to the bottom. In a stretched valley, the gradient mostly points across it, towards the steep walls.
+
+</Example>
+
+That last observation matters a great deal once we start walking. It is why <Preview id="gradient-descent">plain gradient descent zigzags in narrow valleys</Preview>.
+
+## Chains of functions: the chain rule
+
+A neural network is not one function but a long chain of them. A weight feeds a neuron, the neuron feeds a layer, the layer feeds the next layer, and eventually a single number comes out: the loss. We need the sensitivity of that final number to a weight far upstream.
+
+Follow a nudge down the chain. If $y$ depends on $x$ and $z$ depends on $y$, a small nudge $\varepsilon$ in $x$ moves $y$ by about $\tfrac{dy}{dx}\varepsilon$. That movement is itself a nudge to $z$, which moves by $\tfrac{dz}{dy}$ times as much. So
+
+$$
+\frac{dz}{dx} = \frac{dz}{dy} \cdot \frac{dy}{dx}.
+$$
+
+This is the <Term id="chain-rule">chain rule</Term>, and in the nudge picture it barely needs proving: **each link multiplies the nudge by its own local slope, so the end-to-end sensitivity is the product of the local ones.**
+
+<Figure
+  name="chain-rule"
+  title="A nudge travelling down a chain"
+  caption="x = 2 feeds y = 3x, which feeds z = y², which feeds L = z/2. Each link's local slope (×3, ×12, ×0.5) multiplies the nudge as it passes. A nudge of 0.01 in x arrives at L as about 0.18."
+  notice="No link needs to know anything about the others. Each only knows its own local slope, and the product still gives the exact end-to-end derivative, 18."
+/>
+
+Two refinements complete the picture.
+- **Local slopes depend on where you are.** The middle link, $z = y^2$, has slope $2y$, which is 12 only because $y = 6$ at this point. To use the chain rule you need the values flowing through the chain, which is why training first runs the network forward and keeps those values.
+- **Paths add.** If $x$ reaches the output along two separate routes (say it feeds two neurons that both feed the next layer), the nudge travels both and the two effects add up. The full rule is: multiply along each path, then sum over paths.
+
+With both refinements, the chain rule gives the exact gradient of a network's loss with respect to every weight. Doing that efficiently for billions of weights, by sweeping backwards through the chain once and reusing the products, is <Preview id="backpropagation">backpropagation</Preview>.
+
+## Reason with it
+
+**The gradient says "downhill is that way". Why can a big step still make things worse?** The gradient is built from local linearity: it describes the tangent plane, not the landscape. Step far and the real surface curves away from the plane. In the tangent figure, a nudge of 0.1 is predicted almost perfectly. But at $x = 1$ the slope is $-0.45$, so downhill is to the right, and a step of 1 lands at $x = 2$, where the height is 0.40: higher than the 0.25 you started from. You stepped clean over the valley floor at $x \approx 1.41$. So any method that follows gradients has to choose a step size, and a step that is too big can land you higher than where you started.
+
+**A signal passes through 20 stages that each have local slope 0.5. What does that do to the sensitivity of the output to the first stage?** Sensitivities multiply, so it is $0.5^{20} \approx 0.000001$. A nudge at the start becomes invisible at the end, and the first stage would get essentially no guidance about how to change. With slope 1.1 per stage over 50 stages, the product is about 117 instead. Long chains amplify or crush sensitivity exponentially, which is exactly the problem deep networks face with <Preview id="backpropagation">vanishing and exploding gradients</Preview>.
+
+**The gradient is zero. Are you at the bottom?** Not necessarily. Zero gradient means the tangent plane is flat, which is true at the bottom of a valley, the top of a hill, and at a saddle that rises one way and falls another. The tangent figure shows two flat points, one a peak and one a valley. The gradient alone cannot tell them apart; you have to look at how the slope itself changes (the curvature), or take a step and see.
+
+## Where this picture breaks
+
+- **Not everything is smooth.** ReLU has a sharp corner at zero, where the slope jumps from 0 to 1 and no single tangent exists. In practice frameworks just pick one of the two slopes there, and it works because landing exactly on the corner is rare. The zoom-in picture holds almost everywhere, not everywhere.
+- **Two dimensions hide the scale.** A real loss depends on millions or billions of parameters. You cannot draw that landscape, but the derivation above never used the number of dimensions: $\Delta f \approx \nabla f \cdot \Delta$ holds in any dimension, and so do steepest ascent and perpendicular contours.
+- **The gradient is local knowledge only.** It tells you the slope underfoot, not where the lowest valley is. How far to step, how to avoid zigzags and what to do with noisy gradients is the subject of <LessonLink id="gradient-descent" />.
+- **A real training loss is not one fixed landscape.** It is an average over data, and in practice it is estimated from a small random sample at each step, so the ground itself shifts a little between steps. That too is covered in gradient descent.
+
+## Why it matters in the feed
+
+"Gradient" is everywhere in AI writing. Every mainstream model is trained by *gradient-based* optimisation, and most training tricks you will read about (gradient clipping, gradient checkpointing, gradient accumulation) are ways of computing, storing or taming this one vector. The same idea also runs the other way: the derivative of a model's output with respect to its *input* says which pixels or words the output is most sensitive to. Interpretability papers and "saliency maps" are gradients read as explanations, with the caveat that local sensitivity is not the same thing as causal importance.
+
+## Recap
+
+- A derivative is the local exchange rate between a nudge of the input and the change in the output: the slope of the tangent, trustworthy for small nudges only.
+- With many inputs, each axis has a partial derivative, and together they form the gradient vector.
+- The change for a small step is the dot product $\nabla f \cdot \Delta$, using the alignment picture from the vectors lesson. So the gradient points steepest uphill, its length is the steepness and it is perpendicular to contours.
+- The chain rule: along a chain, local sensitivities multiply; across separate paths, they add. Long chains can shrink or blow up sensitivities exponentially.
+- Downhill ($-\nabla f$) is the direction training will step, but it need not point at the bottom.

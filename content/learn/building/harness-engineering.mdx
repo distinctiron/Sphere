@@ -1,0 +1,166 @@
+---
+id: harness-engineering
+title: Harness engineering
+summary: Everything around the model that makes an agent work. Tools shaped for the model, permissions and sandboxes, hooks, and context management (system prompts, memory files, compaction, sub-agents), with human approval where it counts. Claude Code serves as the worked case.
+minutes: 12
+model: context-machine
+buildsOn: [agent-loop, tool-use, context-engineering]
+related: [model-api, rag, hosting, skills-mcp, evals, agent-security]
+keywords: ["agent harness", "harness engineering", "Claude Code", "coding agent", "sub-agents", "context compaction", "CLAUDE.md", "agent SDK", "sandboxing", "human in the loop"]
+reviewed: 2026-09-29
+quiz:
+  - question: A team wants the code formatter to run after every single file edit their agent makes. Where should that rule live?
+    options:
+      - In the memory file (such as CLAUDE.md), phrased as strongly as possible
+      - In a hook that the harness runs after each edit tool call, because it must happen every time and needs no judgment
+      - In the user's first message of each session
+      - Nowhere; the model will learn to do it
+    answer: 1
+    explanation: Instructions in the context condition the model; they make an action likely, not certain. A hook is ordinary code the harness runs at a fixed point in the loop, so it happens every time. Put mechanical, always-true rules in hooks, and judgment and context in memory files.
+  - question: A main agent hands a codebase search to a sub-agent. The sub-agent reads about 140,000 tokens of files and returns a 2,000-token report. How much does the main agent's context grow?
+    options:
+      - About 140,000 tokens, because it has to see what the sub-agent read
+      - Nothing at all
+      - About 70,000 tokens, since half is summarised
+      - About 2,000 tokens plus the task description it wrote, because only the handoff and the report cross between the two contexts
+    answer: 3
+    explanation: A sub-agent is a separate loop with its own fresh context window. The main agent only ever sees the tool call it made (the task description) and the tool result (the report). The reading stays in the sub-agent's context, which is thrown away.
+  - question: Late in a long session, after an automatic compaction, an agent reintroduces a bug it had fixed earlier. What is the most likely cause?
+    options:
+      - Compaction replaced the detailed history with a model-written summary, and the fix, and the reason for it, did not make it into the summary or into any file the agent re-reads
+      - The model's weights changed during the session
+      - The sandbox reverted the file
+      - Hooks undo edits after compaction
+    answer: 0
+    explanation: Compaction is lossy by design. Whatever the summary omits no longer exists for the model, just as trimmed chat history no longer exists in the model API lesson. Durable decisions belong in files, such as notes, tests or the memory file, that survive compaction.
+  - question: Why can running an agent's shell commands inside a sandbox let you safely reduce the number of approval prompts?
+    options:
+      - The sandbox makes the model more accurate
+      - Sandboxed commands run faster, so they need less review
+      - The sandbox limits what any command can touch (files outside the project, the network), so an approved or auto-allowed mistake has a bounded blast radius, and fewer decisions need a human
+      - It doesn't; sandboxes and permissions are unrelated
+    answer: 2
+    explanation: Permissions decide whether a call runs; the sandbox bounds what running it can do. With the worst case bounded, many routine commands can be allowed without asking, which also fights approval fatigue, where people click yes without reading.
+---
+
+Two products built on the same model can behave like different species. One coding assistant fixes a failing test in a large codebase unattended; another, calling the same model, gets lost after three files. The difference is the **harness**: the code around the model that decides what it reads, what its outputs are allowed to do, and how its loop runs.
+
+A good share of the progress in agents over the last two years came from better harnesses, not only better models. This lesson takes the harness apart layer by layer, using Anthropic's Claude Code, a coding agent that runs in a developer's terminal, as the worked case. Product details change fast; the layers do not.
+
+## The picture
+
+This path's model says it outright: the model is a stateless function from context to next token, and **the harness decides what goes into the context and what to do with the output, inside a loop**. Harness engineering is designing both sides of that boundary.
+
+- **Inbound**: what the model reads on each call. That covers system prompts, memory, the index of available skills, and a history kept within budget.
+- **Outbound**: what its output is allowed to do. That covers tools, hooks, permissions, sandboxes and human approval.
+
+<Recall id="agent-loop">
+
+An agent is a model calling tools in a loop until it replies without a tool call or a hard limit stops it. Its context is its whole state and grows with every step. Per-step errors compound over long tasks unless checks make them visible and recoverable.
+
+</Recall>
+
+<Figure
+  name="harness-layers"
+  title="One lap of the loop, through the harness"
+  caption="Top: before each model call, the harness assembles the context from the system prompt, memory files, the index of available skills and the task history. Right: the model decides. Bottom: its tool call passes through hooks, a permission check (which may ask you), a sandbox and finally the tool; the result returns through context management, which trims and compacts."
+  notice="The model is one box out of ten. Every other station is something the harness builder designed: text it chooses to load, or code it runs."
+/>
+
+<KeyIdea>
+
+The model supplies judgment; the harness supplies everything else: the model's view of the world, its hands, its limits and its memory. When an agent behaves well or badly, look first at what the harness **let it see** and what it **let it do**.
+
+</KeyIdea>
+
+## Outbound: tools, hooks, permissions, sandbox
+
+<Recall id="tool-use">
+
+A model never runs anything. It writes a structured tool call; the harness validates and executes it with its own credentials, then appends the result to the context. Tool definitions and results are context, and informative errors let the model recover.
+
+</Recall>
+
+**Tools shaped for the model.** A coding agent's core tools read files, search them, edit them and run shell commands. In Claude Code they are called things like Read, Grep, Glob, Edit, Write and Bash, alongside web fetching and search, a to-do list, and a tool for launching sub-agents. Each design choice traces back to the tool-use lesson.
+
+- **Edit replaces an exact string rather than rewriting the file.** The model writes a few lines instead of a whole file, which saves expensive, slow output tokens. And if the string is missing or matches twice, the tool returns an error the model can act on.
+- **Read returns numbered lines and caps the length.** The model can refer to precise locations, and one large file cannot swamp the window.
+- **Search is text and pattern matching, not embeddings.** Code is full of identifiers, and, as in the RAG lesson, keyword search finds identifiers exactly.
+- **Bash is the escape hatch.** It can build, test, install and deploy anything, which makes it the most useful tool and the most dangerous.
+
+**Permissions.** Every tool call passes a policy before it runs: **allow**, **ask** or **deny**. Rules can match a tool and a pattern: allow `npm test`, ask before any other shell command, deny reading `.env` files. Claude Code, for example, bundles common policies into permission modes (the names and details change between versions):
+- the default, which asks before edits and commands;
+- one that accepts file edits automatically;
+- a **plan mode** that is read-only, so the agent can investigate and propose but not change anything;
+- a mode that bypasses prompts, meant only for isolated environments.
+
+**Sandboxing.** A permission check decides *whether* a command runs. A <Term id="sandboxing">sandbox</Term> limits *what running it can touch*. Operating-system-level restrictions can confine the file system to the project directory and route network access through an allowlist. The two layers compose. Because a sandbox bounds the worst case, more routine commands can be allowed without asking. That matters, because every prompt spends human attention, and people shown too many prompts start approving without reading.
+
+**Hooks.** <Term id="agent-hooks">Hooks</Term> are the user's own scripts, which the harness runs at fixed points in the loop:
+- before a tool call, where a hook can block it, for example any edit under `migrations/`;
+- after a tool call, for example to run the formatter and linter on the edited file and report problems back;
+- when a session starts, to inject context;
+- when the agent tries to stop, to run the tests and send it back to work if they fail.
+
+The reason hooks exist is the heart of harness engineering. An instruction in the context *conditions* the model, so it makes an action likely. A hook *guarantees* it. A stop hook that runs the tests is the "check" from the agent loop, made mechanical.
+
+## Inbound: managing the context
+
+<Recall id="context-engineering">
+
+The context window is a budget of cost, latency and attention. Stable content belongs in a cacheable prefix at the front; every extra token competes for attention; near-miss or stale material distracts rather than helping.
+
+</Recall>
+
+**The system prompt** sets the agent's role, how to use each tool, safety rules and working style. It sits at the front with the tool definitions, forming the stable prefix that every call in a session reuses from the cache.
+
+**Memory files.** A stateless model cannot remember your project between sessions, so the harness does it for the model. Claude Code loads markdown files named `CLAUDE.md`, from the project and from the user's home directory, into the context at the start of every session. They hold what a new colleague would need: build and test commands, conventions, known traps. That is <Term id="memory-file">memory</Term> in the model API lesson's sense: saved text the harness chooses to write into each new context. Agents can also keep **working notes** in files, such as a plan, a to-do list or a log of decisions. They can re-read them at any time, and files survive whatever happens to the context.
+
+**Compaction.** A long task eventually fills the window. When it nears the limit, the harness asks the model to summarise the session so far (the goal, decisions, files changed, open problems) and continues with that summary in place of the history. Developers can also trigger it by hand. <Term id="compaction">Compaction</Term> is lossy by design. It trades detail for room, and whatever the summary omits is gone.
+
+**Sub-agents.** Some work needs a lot of reading but produces little: "find where authentication tokens are validated". A <Term id="sub-agent">sub-agent</Term> is a second agent loop with a **fresh context window**. The main agent starts it with a tool call containing a task description. The sub-agent reads as much as it needs and returns a short report as the tool result. Its own context is then discarded. Several can run in parallel. The price is the handoff: the task description is the sub-agent's entire world, so a vague brief produces a vague search.
+
+<Figure
+  name="context-compaction"
+  title="Two ways to keep a long task inside the window"
+  caption="Top: tool results pile up until the context passes a threshold; the harness replaces the history with a short, model-written summary and the task continues. Bottom: a sub-agent does the reading in its own fresh window, and only its short report enters the main context."
+  notice="Both moves shrink what the main context holds, but compaction throws detail away after the fact, while a sub-agent never lets it in."
+/>
+
+<Example title="what each move buys">
+
+In the figure, the main context reaches 170,000 tokens of a 200,000-token window. Compaction replaces 155,000 tokens of tool results with a 12,000-token summary, so the next call reads 27,000 tokens. That is about a sixth of the cost and prefill time per call, with room for many more steps.
+
+The sub-agent's window fills to 143,000 tokens (its own prompt and brief, then 135,000 tokens of files), while the main context grows only by the brief it wrote and the 3,000-token report. Had the main agent done that reading itself, every one of its later calls would re-read the 135,000 tokens of files. Over 20 more steps that is about 2.7 million extra input tokens, and 135,000 tokens of search noise competing for attention in every decision.
+
+</Example>
+
+**Human in the loop.** The harness decides where human judgment enters: approving risky calls, reviewing a plan before any change, interrupting and redirecting mid-task, reviewing the final diff. Human attention is the scarcest resource in the system. A good harness spends it where actions are irreversible or the agent is uncertain, and nowhere else. That is <Term id="human-in-the-loop">human-in-the-loop</Term> design.
+
+## Reason with it
+
+**Why can the same model score very differently on a coding benchmark depending on the harness?** The score measures model *and* harness. The harness decides which files the model sees and how results are truncated, how precise its edits can be, whether it runs the tests before stopping, and how it recovers from a full window. Each of these changes per-step reliability, and, from the agent loop, per-step reliability compounds. When comparing results, check that the harness was the same.
+
+**When should a rule go in a hook, and when in the memory file?** Ask whether it needs judgment. "Run the formatter after every edit" and "never touch `migrations/`" are mechanical and must always hold, so they belong in hooks, where they are certain. "Prefer small, focused commits" and "this module is legacy; avoid refactoring it unless asked" need weighing against the task, so they belong in the memory file, where the model can apply them sensibly. Putting judgment in hooks makes the agent rigid; putting guarantees in prose makes them probabilistic.
+
+**Why do sub-agents help even when the window could hold everything?** Because the window is an attention budget, not just a size limit. Tens of thousands of tokens of search results the main agent no longer needs are near-miss material in every later decision. A sub-agent turns them into a report that contains only the conclusion, which improves the main agent's later steps as well as making them cheaper.
+
+## Where this picture breaks
+
+- **Harness and model co-evolve.** Models are post-trained using particular tools and harness conventions, so a model can work best inside the harness it was trained with. The line between "model capability" and "harness design" is blurrier than the diagram suggests.
+- **Product specifics move fast.** Tool names, permission modes and hook events are described here as of mid-2026. The durable part is the split: inbound (what it reads) and outbound (what it may do).
+- **Context management has no free lunch.** Compaction and sub-agents trade information for space. No harness can recover what a summary left out; it can only make sure the important things were written somewhere durable first.
+- **Permissions guard actions, not the content of the context.** If untrusted text steers the model, it can misuse exactly the tools it is allowed to use. That is <Preview id="agent-security">agent security</Preview>.
+- **Capabilities can be loaded on demand.** Putting every instruction and tool definition into every context does not scale. Packaging them to be loaded only when relevant is the subject of <Preview id="skills-mcp">skills and MCP</Preview>.
+
+## Why it matters in the feed
+
+When a coding agent jumps on a benchmark without a new model, the harness changed. When products announce "auto-compact", "memory", "sub-agents" or "plan mode", they are adding layers from this lesson. Where each part runs matters too. The model runs on a provider's inference servers (see <LessonLink id="hosting" />), while the harness can run on your laptop, next to your files and credentials. That is why its permissions and sandbox are your concern, not the provider's. Agent SDKs that expose "the same harness that powers" some product are selling exactly these layers, packaged for others to build on.
+
+## Recap
+
+- The harness is everything but the model. Inbound, it assembles what the model reads; outbound, it governs what the model's output may do; and it runs the loop from the agent-loop lesson.
+- Tools are designed for the model, as tool use taught: precise edits, bounded reads, exact search, and errors that teach.
+- Permissions decide whether a call runs, sandboxes bound what it can touch, and hooks turn rules that must always hold into code rather than hopeful instructions.
+- Context management applies context engineering over time: stable system prompts, memory files loaded each session, working notes in files, compaction when the window fills, and sub-agents with fresh windows for heavy reading.
+- Human approval is a budget too: spend it on irreversible or uncertain actions.

@@ -1,0 +1,162 @@
+---
+id: training-in-practice
+title: Training in practice
+summary: Why low training loss is not the goal, and how practitioners tell learning from memorising. Held-out data, the U-curve of underfitting and overfitting, regularisation, data quality and the honest story of double descent.
+minutes: 11
+model: loss-landscape
+buildsOn: [gradient-descent]
+related: [backpropagation, forward-pass, pretraining, evals]
+keywords: ["overfitting", "generalization", "generalisation", "validation set", "held-out", "regularization", "weight decay", "dropout", "early stopping", "double descent"]
+quiz:
+  - question: During training, the training loss keeps falling but the validation loss has been rising for the last few thousand steps. What is happening, and what is the most direct response?
+    options:
+      - The model is underfitting; train for longer
+      - The model is overfitting, fitting details of the training set that do not carry over; stop at (or return to) the checkpoint with the lowest validation loss, and consider more regularisation or more data
+      - The learning rate is too small; raise it
+      - The validation set is broken, because validation loss should always track training loss
+    answer: 1
+    explanation: The training landscape and the landscape of new data share their broad shape but differ in detail. When the two curves part ways, further descent is fitting the training sample's specifics. Early stopping keeps the best point; weight decay, dropout or more data make the training landscape a better stand-in for the real one.
+  - question: A team tries 200 combinations of learning rate, model size and dropout, and picks the one with the best validation score. Why should they not report that validation score as their expected accuracy?
+    options:
+      - Validation scores are always higher than test scores by definition
+      - Choosing the best of 200 on the validation set lets its random quirks influence the choice, so the winning score is optimistically biased; a test set untouched by any choice gives the honest estimate
+      - The validation set was used for gradient descent
+      - Hyperparameters do not affect accuracy
+    answer: 1
+    explanation: Every decision made by looking at a dataset fits a little of that dataset's noise. With 200 tries, some configurations win partly by luck on those particular examples. That is overfitting at the level of choices instead of weights, and only data that played no part in any choice can measure it.
+  - question: A degree-13 polynomial passes exactly through 14 training points, giving zero training error. What does that tell you about how well it will predict new points?
+    options:
+      - That it will predict perfectly, because the error is zero
+      - Almost nothing, because 14 coefficients can fit any 14 points, pattern and noise alike
+      - That the data has no noise
+      - That the model is underfitting
+    answer: 1
+    explanation: When a model has as many free parameters as data points, it can hit every point whatever they are. Zero training error then carries no evidence that the model found the pattern. In the figure its validation error is about 3, over ten times the best model's.
+  - question: With weight decay, each gradient descent step becomes θ ← θ − η(∇L + λθ). How does this change the walk on the loss landscape?
+    options:
+      - It only changes the learning rate
+      - Every step also pulls all parameters a little towards zero, so the walk settles where the downhill pull of the data balances the pull towards small weights, favouring smoother functions
+      - It stops training once the weights are small
+      - It adds random noise to each step, like a mini-batch
+    answer: 1
+    explanation: Rewriting the step as θ ← (1 − ηλ)θ − η∇L shows two forces. The data's gradient pulls downhill on the training landscape, and the decay term shrinks every weight by the fraction ηλ. Only features the data consistently supports can hold a weight large, while weights that exist only to chase noise decay away.
+---
+
+A model can reach almost zero loss on its training data and still be useless. Memorising the answers to last year's exam is not the same as understanding the subject. What we actually want is a model that does well on data it has **never seen**: the next sentence a user types, the next scan a doctor uploads. Training loss cannot tell you whether you have that.
+
+This lesson covers the practice that sits around gradient descent: how practitioners measure <Term id="generalisation">generalisation</Term>, how models fail to generalise, what they do about it, and why the classic story needed a revision once models became enormous.
+
+## The picture
+
+Extend the loss landscape. Gradient descent walks downhill on a landscape whose height is the loss **on the training data**. But the landscape we care about is the loss on *all* the data the model will ever meet. The two are made from samples of the same world, so they share their broad shape: the valleys that capture the real pattern exist in both. Their fine detail differs, though, because the training landscape also has bumps and dips carved by the specific examples, including their noise, typos and coincidences.
+
+Early in training, going downhill on the training landscape also goes downhill on the real one: the model is learning the shared broad shape. Later, the only remaining descent may be into dips that exist in the training landscape alone. The model then gets better at its training data and worse at everything else. That is <Term id="overfitting">overfitting</Term>.
+
+We cannot see the real landscape, but we can sample it. A <Term id="validation-set">validation set</Term>, data held back from training, gives an independent estimate of the height at the current location.
+
+<Figure
+  name="train-val-curves"
+  title="Where the two landscapes part ways"
+  caption="Illustrative loss curves during one training run. Training loss keeps falling. Validation loss, measured on held-out data, falls with it at first, then turns up once the model starts fitting details specific to the training set."
+  notice="The best model is not at the end of training but at the bottom of the validation curve. The widening gap between the curves after that point is fitted noise."
+/>
+
+<KeyIdea>
+
+Training descends the landscape of the training data, a noisy sample of the landscape that matters. Held-out data is the only way to see the difference. Every technique in this lesson either measures that difference or keeps the model from descending into features that only the training sample has.
+
+</KeyIdea>
+
+## Three piles of data
+
+<Recall id="gradient-descent">
+
+Gradient descent repeatedly steps against the gradient of the loss: $\theta \leftarrow \theta - \eta \nabla L$. The loss is an average over training examples, so the data defines the landscape. Settings like the learning rate $\eta$ and batch size are chosen by people, not learned.
+
+</Recall>
+
+Practitioners split their data three ways:
+
+| split | used for | touched by |
+|---|---|---|
+| training set | computing gradients | every step |
+| validation set | choosing when to stop and which settings to use | every decision |
+| <Term id="test-set">test set</Term> | one final, honest estimate | nothing until the end |
+
+Why two held-out piles? Every choice made by looking at the validation score, such as the learning rate, model size or number of steps, fits a little of that set's quirks. These choices are called <Term id="hyperparameter">hyperparameters</Term>. Try enough of them and the best validation score is partly luck. The test set, used once, measures what the whole process delivers. If you tune on it, it quietly becomes a second validation set.
+
+The splits only work if they are truly separate. **Leakage**, where the same or nearly the same examples appear on both sides, makes held-out scores meaningless. For language models trained on large parts of the web, this is a live problem: benchmark questions can end up in the training data, a failure known as <Term id="benchmark-contamination">contamination</Term> and a central worry of <LessonLink id="evals" />.
+
+## Capacity and the U-curve
+
+How much a model can fit depends on its capacity: roughly, how many different shapes its parameters let it take. A tiny model cannot follow the pattern at all: it underfits. A huge one can follow the pattern *and* every accident in the sample. The figure makes this concrete with the simplest adjustable model there is, a polynomial whose degree sets its capacity.
+
+<Figure
+  name="fit-complexity"
+  interactive
+  title="From underfitting to overfitting"
+  caption="Fourteen noisy training points (filled) drawn from a smooth curve (dashed), and sixty validation points (hollow) from the same curve, which the fit never sees. Slide the degree to change capacity; the right panel tracks both errors."
+  notice="Training error only ever goes down as the degree rises. Validation error bottoms out near the noise floor and then climbs. Then switch on weight decay and look at degree 13 again."
+/>
+
+<Example title="reading the U-curve">
+
+The data comes from $\sin(3x) + 0.4x$ plus random noise with a typical size of 0.25, so even a perfect model has a root-mean-square error of about 0.25. That is the noise floor.
+
+| degree | training error | validation error | diagnosis |
+|---|---|---|---|
+| 0 (a flat line) | 1.06 | 0.96 | <Term id="underfitting">underfitting</Term>: too simple to follow the curve |
+| 5 | 0.24 | 0.25 | about as good as the noise allows |
+| 13 | 0.00 | 2.95 | overfitting: passes through every point |
+
+Degree 13 has 14 coefficients, one per training point, so it can pass through all 14 exactly, noise included. Its zero training error says nothing about the pattern. Between the points it swings wildly, and its validation error is more than ten times the best model's.
+
+</Example>
+
+The same curve appears when you replace degree with training time, which is why the loss curves in the first figure turn up: every extra step lets the model express a little more detail. It also appears with network width and depth. As <LessonLink id="forward-pass" /> showed, those set how many creases a network can put in its input space.
+
+## Regularisation: keeping the walk honest
+
+<Term id="regularisation">Regularisation</Term> is anything that makes the model prefer the broad shape over the fine detail. The main tools each act on the walk in a different way.
+
+- **<Term id="early-stopping">Early stopping</Term>** stops the walk before it reaches the training-only dips: track validation loss and keep the best checkpoint.
+- **<Term id="weight-decay">Weight decay</Term>** changes the landscape. Adding a penalty $\tfrac{\lambda}{2}\|\theta\|^2$ to the loss makes each step $\theta \leftarrow (1 - \eta\lambda)\theta - \eta \nabla L$: every weight shrinks slightly towards zero at every step. Only features the data supports consistently can keep a large weight. In the figure, weight decay with $\lambda = 0.1$ brings degree 13's validation error from 2.95 down to 0.31.
+- **<Term id="dropout">Dropout</Term>** randomly switches off a fraction of neurons at each training step. No single neuron can be relied on, so the network has to spread what it learns across many, which makes idiosyncratic memorisation harder.
+- **More data** is the strongest regulariser of all. Each extra independent example makes the training landscape a closer copy of the real one, so there are fewer training-only dips to fall into.
+
+Data *quality* matters as much as quantity. Duplicated examples count many times in the average, carving deep training-only dips. Mislabelled examples teach the model to fit noise. That is why so much of the work of building large models is filtering, de-duplicating and cleaning data, and why that work rarely makes headlines.
+
+## Double descent
+
+The U-curve is not the whole story. Around 2019, researchers documented **<Term id="double-descent">double descent</Term>**: as capacity grows, test error falls, rises to a peak near the point where the model can just fit every training example exactly (the "interpolation threshold", degree 13 in our figure), and then *falls again* as capacity keeps growing. The same shape can appear over training time.
+
+The usual explanation is that past the threshold, there are many different settings that fit the training data perfectly, and gradient descent from small random starting weights tends to find smooth ones among them. Very large networks, far beyond the threshold, often generalise well despite having more parameters than training examples.
+
+Be careful with this in both directions. Double descent is real and reproducible, but the peak is often small or erased by good regularisation, and it does not mean "bigger is always safer". Large language models mostly live somewhere else entirely: <Preview id="pretraining">they are trained on so many tokens</Preview> that they usually see most data only once or a few times, and their training and validation losses stay close. Overfitting in the classic sense matters most when the dataset is small relative to the model, as in fine-tuning.
+
+## Reason with it
+
+**Why do large pretraining runs rarely need early stopping, while fine-tuning on 5,000 examples does?** A pretraining run sees each token about once, so every step's mini-batch is fresh data: the training landscape it descends is essentially a new sample of the real landscape each time, and there are no repeated examples to memorise. Fine-tuning a model with billions of parameters on a few thousand examples for several <Term id="epoch">epochs</Term> is the opposite regime. The capacity dwarfs the data, and each repetition lets the model carve deeper into the same training-only dips. Validation loss turns up within a few epochs.
+
+**A model scores 95% on a public benchmark but disappoints on your own similar questions. What should you suspect first?** Leakage. If benchmark questions, or close paraphrases, appeared in the training data, the benchmark measured memorisation, not generalisation. From the picture, the benchmark was never truly held out, so it stopped being a view of the real landscape.
+
+**Why does doubling the training data often help more than any regulariser?** Regularisers bias the walk away from training-only dips, but they cannot tell a genuine subtle pattern from noise; weight decay shrinks both. More independent data removes noise-driven dips from the landscape itself while strengthening the real ones. That is why labs spend so much on data, and why the useful question is often "how much more data would we need?" rather than "which regulariser?".
+
+## Where this picture breaks
+
+- **Held-out data is itself a sample.** A small validation set gives a noisy estimate, and one used for hundreds of decisions gets overfitted too.
+- **Held out is not the same as the real world.** A random split assumes future data looks like past data. Deployment brings new topics, new users and new styles (distribution shift), which no split of old data can measure.
+- **Two landscapes is a simplification.** The "real" landscape is an expectation over a distribution, not a fixed surface you could draw. The picture captures the logic, not the mathematics of generalisation, which is still incompletely understood for large networks.
+- **"Flat valleys generalise better" is a heuristic.** A popular intuition says that wide, flat minima of the training landscape survive the shift to the real one better than narrow ones. There is evidence for it, and counterexamples too. Treat it as a guide, not a law.
+
+## Why it matters in the feed
+
+When a benchmark result is questioned because of "contamination", it is the leakage problem: the test set was not really held out. When a model card says it was trained for "one epoch" on trillions of tokens, it signals the data-rich regime where classic overfitting is rare. When a paper claims a big jump from data filtering or de-duplication rather than a new architecture, it is working on the landscape itself. And when a fine-tuned model has become strangely repetitive or worse at general tasks, overfitting to a small fine-tuning set is a likely suspect, a thread picked up in <LessonLink id="post-training" />.
+
+## Recap
+
+- Gradient descent minimises loss on the training data, a noisy sample of the landscape that matters. Generalisation to new data is the actual goal.
+- Validation data estimates the real landscape and guides every choice. A separate test set, used once, gives the honest final number.
+- As capacity or training time grows, training error keeps falling while validation error traces a U: underfitting, then a sweet spot, then overfitting.
+- Regularisation (early stopping, weight decay, dropout) and above all more and cleaner data keep the walk on the shared broad shape.
+- Double descent shows the U-curve is not the whole story for very large models, and LLM pretraining mostly sits in a data-rich regime where classic overfitting is rare.

@@ -1,0 +1,150 @@
+---
+id: sovereign-ai
+title: Sovereign AI and industrial policy
+summary: Why states want domestic chips, compute and models, what they can realistically buy, and what each holds or depends on. Taiwan concentration risk, the US and EU Chips Acts, Japan's Rapidus, Gulf, Indian and European compute programmes, read as moves to secure links on the bottleneck map.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [semiconductors, export-controls]
+related: [buildout, labs, hyperscalers, value-chain, national-security]
+keywords: ["sovereign AI", "CHIPS Act", "Chips Act", "Rapidus", "Taiwan", "TSMC Arizona", "AI gigafactories", "national AI compute", "G42", "IndiaAI"]
+reviewed: 2026-09-29
+quiz:
+  - question: Why do Gulf states build very large AI data centers but not leading-edge chip fabs?
+    options:
+      - Fabs are illegal in desert climates
+      - They hold abundant power, capital and fast permits, which are scarce links for data centers, but a fab needs years of accumulated process learning that money cannot quickly buy
+      - Data centers need no chips
+      - They already own TSMC
+    answer: 1
+    explanation: States build where their strengths bind for others. Power and capital are exactly what data centers are short of, so the Gulf can trade them for access to chips and partners. A fab's barrier is learning, not money, so the same capital buys far less sovereignty there.
+  - question: A government announces a sovereign AI cluster using imported accelerators, run by a foreign cloud provider in a local data center. Which dependencies remain?
+    options:
+      - None; the cluster is sovereign
+      - The chips (and their future supply and export licences), the cloud's software and the legal reach of the provider's home country, even though the data stays local
+      - Only the electricity supply
+      - Only the building
+    answer: 1
+    explanation: Sovereignty is link by link. Local data centers secure the site and data residency, but not the chips, which can be cut off by export rules, nor the operator's jurisdiction. Such a cluster reduces some dependencies and keeps others, which is often a sensible trade, but not full sovereignty.
+  - question: If Taiwan's leading-edge fabs stopped producing for a year, which assets would most likely rise in value?
+    options:
+      - New chip designs that have not yet been manufactured
+      - Accelerators already installed and running, and the clouds that own them, because new supply of the binding link would stop
+      - Chip design software
+      - Nothing, since other fabs would take over within weeks
+    answer: 1
+    explanation: The leading-edge fab is a chokepoint with years of time-to-replicate. If it stopped, output of new accelerators would collapse, and existing capacity would become the scarce link. Installed chips and the clouds holding them would gain pricing power, while designs waiting for manufacture would be worth less. This is the concentration risk subsidies try to reduce.
+  - question: Why can the EU's hold on EUV lithography not simply be used as a weapon like US controls?
+    options:
+      - EUV machines are not important
+      - The EUV maker itself depends on US-origin components and allied markets, so using it unilaterally risks retaliation and cuts off its own customers; its leverage works best inside an alliance
+      - The EU has no export laws
+      - ASML sells only to European firms
+    answer: 1
+    explanation: Chokepoints are layered and interdependent. ASML relies on US-origin technology and on customers in Taiwan, Korea, the US and China. Holding a link others need gives bargaining power, but using it alone exposes the holder too, which is why European leverage is mostly exercised in coordination with allies.
+---
+
+"Sovereign AI" appears in announcements from Paris to Riyadh to New Delhi: national compute clusters, subsidies for chip factories, local-language models, deals to host giant data centers. The United States paid chipmakers to build at home and took a stake in one of them. Japan is funding a new company to make 2-nanometre chips. The Gulf states are trading capital and cheap power for American chips.
+
+These look like very different policies. On the bottleneck map they are the same move: a state trying to make sure that no foreign actor can cut it off from a link it depends on. This lesson shows what each state can and cannot secure, and at what price.
+
+## The picture
+
+<Recall id="export-controls">
+
+Export controls deny a rival the chokepoints it depends on. They buy time, impose the cost of a detour, and spend leverage, because every workaround the target builds is a chokepoint lost. The US has used them on tools, chips, memory and named companies, and in January 2025 issued, then rescinded before it took effect, a rule capping how much compute even friendly countries could import.
+
+</Recall>
+
+Export controls are the **deny** side of state action on the map. <Term id="sovereign-ai">Sovereign AI</Term> is the **secure** side. The controls showed every government that access to compute can be withdrawn. So each asks: which links do we hold, which do we depend on, and who could cut those off?
+
+Full self-sufficiency is out of reach for almost everyone, because the chain's deepest links take decades to replicate. So states use three levers:
+- **Hold a link others need**, so that dependence is mutual and cutting you off is costly.
+- **Diversify** dependence across several suppliers or friendly countries.
+- **Build domestically** where a dependence is most dangerous, accepting the cost.
+
+<Figure
+  name="sovereignty-map"
+  interactive
+  title="Who holds which link"
+  caption="Eight links of the AI chain, from lithography tools at the bottom to frontier models at the top. For each state or bloc, a rough judgement of whether it holds the link (a domestic leader others rely on), holds part of it, or depends on others. As of mid-2026, simplified."
+  notice="No one holds every link, not even the US or China. Compare what each holds with what it is trying to buy: the policies aim at the links marked 'depends' that would hurt most if cut."
+/>
+
+<KeyIdea>
+
+Sovereignty in AI is not owning every link. It is making sure that **no single foreign actor can cut you off from a link you need**, usually by holding a link others need in return, spreading your dependence, or building at home where the risk is greatest. The cost of building rises steeply towards the bottom of the chain, so most states secure the top (sites, compute, models) and bargain for the rest.
+
+</KeyIdea>
+
+## Taiwan: the concentration risk
+
+<Recall id="semiconductors">
+
+TSMC makes the large majority of the world's leading-edge logic chips, including nearly all AI accelerators sold on the open market, and most of its advanced packaging, almost all of it in Taiwan. Its lead rests on years of yield learning that rivals cannot quickly copy.
+
+</Recall>
+
+That concentration makes one island a single point of failure for the entire AI build-out. A blockade, conflict or disaster that halted Taiwan's leading-edge fabs would stop new accelerator supply for years, not months, because no other fab could take over at scale. Some argue that this dependence is a **<Term id="silicon-shield">silicon shield</Term>**: the world's reliance on Taiwan raises the cost of attacking it and the incentive to defend it. Others counter that it makes Taiwan a prize, and that the shield weakens as production spreads abroad.
+
+TSMC is spreading production: it has fabs under way in Arizona (with commitments raised to about \$165 billion in 2025), in Kumamoto in Japan and in Dresden in Germany. But fabs abroad cost more to run, take years to ramp, and have typically received a new process after Taiwan. The newest node and most advanced packaging still start at home.
+
+## Buying fabs: the Chips Acts
+
+Most chip-producing economies now subsidise manufacturing. These <Term id="chips-act">Chips Acts</Term> and similar programmes work in much the same way.
+- **United States.** The CHIPS and Science Act (2022) provided about \$39 billion in manufacturing grants, a 25% investment tax credit (raised to 35% in 2025), and research funding. Grants went to Intel, TSMC, Samsung, Micron and others. In 2025 the government converted part of Intel's grants into an equity stake of about 10%, and it has also used tariff threats to push firms to build at home.
+- **European Union.** The EU Chips Act (2023) aimed to mobilise about €43 billion of public and private money and to double the EU's share of global production to 20% by 2030. In 2025 the European Court of Auditors judged that target unlikely to be met, and Intel cancelled a planned fab in Magdeburg.
+- **Japan** subsidised TSMC's Kumamoto fabs and is funding Rapidus, a new company that opened a 2 nm pilot line in 2025 and targets mass production around 2027, with government support of more than a trillion yen so far.
+- **China** runs the largest effort, including a third national chip investment fund of about 344 billion yuan (roughly \$47 billion) launched in 2024. **Korea** and **India** offer large tax credits and grants; India's first fabs and assembly plants are under construction.
+
+Subsidies lower the cost of capital. They do not buy the learning curve. So a subsidised fab abroad is best read as **insurance**: a state paying a premium, in grants and higher operating costs, to reduce the damage if the concentrated link were cut.
+
+## Buying compute and models
+
+Further up the chain, sovereignty is cheaper, and nearly every state is buying it. The motives differ:
+- **Supply security:** domestic clusters, bought before any cap on imports arrives.
+- **Jurisdiction and data:** laws such as the US CLOUD Act can give a provider's home government reach over data it holds abroad, which worries European governments that rely on US clouds. Keeping data and compute under local law is a form of <Term id="data-sovereignty">data sovereignty</Term>.
+- **Language and public services:** models that handle local languages, laws and institutions well.
+- **Economic capture:** keeping some of the chain's margins and skills at home.
+- **Security:** workloads for defence and intelligence that must run on trusted infrastructure.
+
+The programmes follow each state's strengths. The EU funds shared "AI factories" at its supercomputing centres and in 2025 announced InvestAI, a plan to mobilise €200 billion, including a fund of about €20 billion for <Term id="ai-gigafactory">AI gigafactories</Term> of around 100,000 advanced chips each. France drew pledges of more than €100 billion of private investment at its 2025 AI summit and backs Mistral. India's IndiaAI Mission subsidises access to tens of thousands of GPUs for local researchers and funds domestic models. The UAE, through G42 and the investment firm MGX, and Saudi Arabia, through the state-backed Humain, offer capital, cheap power and fast permits. In return they have secured access to US chips and partners, most visibly a planned 5 GW UAE–US AI campus announced in 2025, under security conditions set by Washington, such as removing Chinese hardware and controlling who uses the chips.
+
+<Example title="what a national budget buys, rung by rung">
+
+Rough orders of magnitude, as of mid-2026:
+- **A national GPU cluster** of 10,000 current accelerators, with systems and networking: roughly **\$0.5 billion**, plus power and a site. Buildable in about a year, if export licences allow.
+- **A frontier-competitive model programme:** from the labs lesson, training costs of hundreds of millions to billions of dollars **per generation**, rising roughly two to three times a year, plus scarce talent.
+- **A leading-edge fab:** **\$20 billion or more**, plus years of yield learning, and the tools themselves must be allowed in.
+- **EUV lithography:** not for sale at any price; one company, decades of development.
+
+Each rung down costs one to two orders of magnitude more and takes years longer. That is why most "sovereign AI" programmes buy the top rungs and bargain for the rest.
+
+</Example>
+
+## Reason with it
+
+**Why do the Gulf states build giant data centers but not fabs?** They hold what data centers are short of: power, capital and fast permitting, the scarce links from <LessonLink id="buildout" />. Those are exactly the links US companies need, so the Gulf can trade them for chips and partnerships. A fab's barrier is learning, which their capital cannot shortcut. States build where their abundance meets someone else's scarcity.
+
+**A country announces a sovereign AI cluster using imported chips in a local data center run by a US cloud. Is it sovereign?** Partly. It secures the site, local data residency and some capacity. It still depends on chip imports, and so on future export licences; on the cloud's software; and on the reach of the provider's home government. That can be a sensible trade, but it moves dependence rather than removing it. Always ask which links an announcement actually secures.
+
+**Taiwan's leading-edge fabs stop for a year. What happens along the chain?** New accelerators stop arriving, so the binding link becomes installed capacity. Chips already running, and the clouds that own them, gain enormous pricing power. Labs with secured compute pull ahead; those planning to buy fall behind. Chip designers with no fab alternative lose revenue. This scenario is the reason the Chips Acts exist, and why hyperscalers want second sources.
+
+## Where this picture breaks
+
+- **"Sovereign" is often branding.** Many programmes are domestic data centers running US chips, sometimes operated by US clouds. That is real but partial.
+- **Models do not respect borders.** Open-weight models from the US, China and Europe are available everywhere, so for many uses a capable model is not the scarce link; compute and skills are.
+- **Subsidies can fail.** Cancelled fabs and missed targets show that money cannot overcome weak demand, high costs or missing skills. A fab without customers is not security.
+- **Firms are not states.** TSMC, Nvidia and the hyperscalers have their own interests, and they shape these policies as much as follow them.
+- **Interdependence also stabilises.** Mutual dependence can deter as well as threaten. Pursuing full independence can remove the costs that keep rivals cautious.
+
+## Why it matters in the feed
+
+When a government announces a sovereign AI plan, find which link it secures: site and power, compute, models, or manufacturing, and which it still imports. When a chipmaker announces a fab abroad, look at the node, the timeline and the subsidy, and read it as insurance. When a Gulf state signs a chip deal, look for the security conditions attached. And when you read about Taiwan, remember that it is not only about geopolitics; for the AI chain it is the single largest concentration of a binding link.
+
+## Recap
+
+- Sovereign AI is the **secure** side of states acting on the map, the counterpart of export controls' **deny** side.
+- No state holds every link; sovereignty means no single foreign actor can cut you off, through **mutual dependence, diversification or domestic building**.
+- **Taiwan** concentrates the leading-edge fab and packaging links from the semiconductors lesson; fabs abroad are insurance that costs more and trails the newest node.
+- **Chips Acts** buy capacity, not learning; **compute and model programmes** are cheaper and follow each state's abundant link: capital and power in the Gulf, ASML's leverage and regulation in Europe, market and talent in India.
+- Each rung down the chain costs one to two orders of magnitude more, so most states secure the top and bargain for the rest.

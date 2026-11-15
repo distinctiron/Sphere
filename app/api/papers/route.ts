@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { PaperStatus } from "@prisma/client";
+import { PaperStatus, Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
+
+/** Window used for "new" papers before a user's second login */
+const FIRST_VISIT_WINDOW_DAYS = 7;
+const DEFAULT_INCOMING_LIMIT = 100;
+const MAX_INCOMING_LIMIT = 200;
 
 /**
  * GET /api/papers
@@ -12,7 +17,9 @@ export const runtime = "nodejs";
  * Query parameters:
  * - status: Filter by paper status (optional, used for incoming articles)
  * - inLibrary: Filter by library membership (true/false, used for library section)
- * - limit: Maximum number of papers to return (optional)
+ * - limit: Maximum number of papers to return (optional; incoming defaults to 100, max 200)
+ * - scope: Incoming only. "new" (default) = papers added since the user's previous
+ *          login (last 7 days on first visit); "all" = every paper not dismissed/saved
  * 
  * Examples:
  * - GET /api/papers?inLibrary=true - Get all library papers (ordered by display_order)
@@ -29,7 +36,7 @@ export async function GET(request: Request) {
   // Fetch user ID from database using email (more reliable than session.user.id)
   const user = await db.user.findUnique({
     where: { email: session.user.email },
-    select: { id: true },
+    select: { id: true, newPapersSince: true },
   });
 
   if (!user) {
@@ -41,7 +48,9 @@ export async function GET(request: Request) {
   const status = searchParams.get("status") as PaperStatus | null;
   const inLibraryParam = searchParams.get("inLibrary");
   const inLibrary = inLibraryParam === "true" ? true : inLibraryParam === "false" ? false : null;
-  const limit = searchParams.get("limit") ? parseInt(searchParams.get("limit")!, 10) : null;
+  const limitParam = parseInt(searchParams.get("limit") ?? "", 10);
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : null;
+  const scope = searchParams.get("scope") === "all" ? "all" : "new";
 
   try {
     let userPaperStates;
@@ -76,43 +85,33 @@ export async function GET(request: Request) {
         return a.createdAt.getTime() - b.createdAt.getTime();
       });
     }
-    // Query for incoming articles (not dismissed, inLibrary=false or no state)
+    // Query for incoming articles (Story 6.4): pre-processed papers from the
+    // shared papers table, excluding ones the user dismissed or saved to their
+    // library. Papers without a UserPaperState are implicitly NEW.
     // Includes NEW, BEING_PROCESSED, and READ papers - only excludes DISMISSED
     else {
-      // Get all papers that are not dismissed and not in library
-      userPaperStates = await db.userPaperState.findMany({
-        where: {
-          userId,
-          status: {
-            not: PaperStatus.DISMISSED,
-          },
-          inLibrary: false,
-        },
-        include: {
-          paper: true,
-        },
-      });
-
-      // Also need to get papers that don't have a UserPaperState record yet
-      // These are implicitly NEW and not in library (and not dismissed)
-      const allUserPaperStates = await db.userPaperState.findMany({
-        where: { userId },
-        select: { paperId: true },
-      });
-      const userPaperIds = new Set(allUserPaperStates.map((ups) => ups.paperId));
-
-      // Get all papers that don't have a state record
-      // These are implicitly NEW (not dismissed, not in library)
-      const papersWithoutState = await db.paper.findMany({
-        where: {
-          id: {
-            notIn: Array.from(userPaperIds),
+      const since = user.newPapersSince ?? new Date(Date.now() - FIRST_VISIT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const where: Prisma.PaperWhereInput = {
+        ...(scope === "new" ? { createdAt: { gt: since } } : {}),
+        NOT: {
+          userStates: {
+            some: { userId, OR: [{ status: PaperStatus.DISMISSED }, { inLibrary: true }] },
           },
         },
-      });
+      };
 
-      // Convert papers without state to the same format
-      const papersWithoutStateFormatted = papersWithoutState.map((paper) => ({
+      const [papers, total] = await Promise.all([
+        db.paper.findMany({
+          where,
+          include: { userStates: { where: { userId }, take: 1 } },
+          // Scored papers first (SQLite sorts NULLs last in DESC order), then newest
+          orderBy: [{ noveltyScore: "desc" }, { publicationDate: "desc" }],
+          take: Math.min(limit ?? DEFAULT_INCOMING_LIMIT, MAX_INCOMING_LIMIT),
+        }),
+        db.paper.count({ where }),
+      ]);
+
+      const incoming = papers.map((paper) => ({
         id: paper.id,
         arxivId: paper.arxivId,
         title: paper.title,
@@ -125,79 +124,26 @@ export async function GET(request: Request) {
         htmlUrl: paper.htmlUrl,
         noveltyScore: paper.noveltyScore,
         noveltySummary: paper.noveltySummary,
-        status: PaperStatus.NEW,
+        status: paper.userStates[0]?.status ?? PaperStatus.NEW,
         inLibrary: false,
         displayOrder: null,
         createdAt: paper.createdAt,
         updatedAt: paper.updatedAt,
       }));
 
-      // Sort incoming articles: by novelty_score descending (nulls last), then by publication date descending
-      const sortedStatesWithState = userPaperStates.sort((a, b) => {
-        // Handle null scores (put them last)
-        if (a.paper.noveltyScore === null && b.paper.noveltyScore === null) {
-          return b.paper.publicationDate.getTime() - a.paper.publicationDate.getTime();
-        }
-        if (a.paper.noveltyScore === null) return 1; // a goes after b
-        if (b.paper.noveltyScore === null) return -1; // b goes after a
-
-        // Both have scores - compare scores first
-        const scoreDiff = b.paper.noveltyScore - a.paper.noveltyScore;
-        if (scoreDiff !== 0) return scoreDiff;
-
-        // Scores are equal - sort by publication date descending
-        return b.paper.publicationDate.getTime() - a.paper.publicationDate.getTime();
-      });
-
-      // Transform states to paper format
-      const papersWithState = sortedStatesWithState.map((ups) => ({
-        id: ups.paper.id,
-        arxivId: ups.paper.arxivId,
-        title: ups.paper.title,
-        authors: ups.paper.authors as Array<{ name: string }>,
-        abstract: ups.paper.abstract,
-        publicationDate: ups.paper.publicationDate,
-        updatedDate: ups.paper.updatedDate,
-        categories: ups.paper.categories as string[],
-        pdfUrl: ups.paper.pdfUrl,
-        htmlUrl: ups.paper.htmlUrl,
-        noveltyScore: ups.paper.noveltyScore,
-        noveltySummary: ups.paper.noveltySummary,
-        status: ups.status,
-        inLibrary: ups.inLibrary,
-        displayOrder: ups.displayOrder,
-        createdAt: ups.paper.createdAt,
-        updatedAt: ups.paper.updatedAt,
-      }));
-
-      // Sort papers without state by novelty score
-      const sortedPapersWithoutState = papersWithoutStateFormatted.sort((a, b) => {
-        if (a.noveltyScore === null && b.noveltyScore === null) {
-          return b.publicationDate.getTime() - a.publicationDate.getTime();
-        }
-        if (a.noveltyScore === null) return 1;
-        if (b.noveltyScore === null) return -1;
-        const scoreDiff = b.noveltyScore - a.noveltyScore;
-        if (scoreDiff !== 0) return scoreDiff;
-        return b.publicationDate.getTime() - a.publicationDate.getTime();
-      });
-
-      // Combine and sort all incoming articles
-      const allIncomingPapers = [...papersWithState, ...sortedPapersWithoutState].sort((a, b) => {
-        if (a.noveltyScore === null && b.noveltyScore === null) {
-          return b.publicationDate.getTime() - a.publicationDate.getTime();
-        }
-        if (a.noveltyScore === null) return 1;
-        if (b.noveltyScore === null) return -1;
-        const scoreDiff = b.noveltyScore - a.noveltyScore;
-        if (scoreDiff !== 0) return scoreDiff;
-        return b.publicationDate.getTime() - a.publicationDate.getTime();
-      });
-
-      // Apply limit if specified
-      const limitedPapers = limit ? allIncomingPapers.slice(0, limit) : allIncomingPapers;
-
-      return NextResponse.json({ papers: limitedPapers }, { status: 200 });
+      return NextResponse.json(
+        {
+          papers: incoming,
+          meta: {
+            scope,
+            since: scope === "new" ? since : null,
+            isFirstVisit: user.newPapersSince === null,
+            total,
+            pendingScores: incoming.filter((p) => p.noveltyScore === null).length,
+          },
+        },
+        { status: 200 }
+      );
     }
 
     // Apply limit if specified (for library papers)

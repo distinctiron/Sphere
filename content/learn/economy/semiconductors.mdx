@@ -1,0 +1,152 @@
+---
+id: semiconductors
+title: Semiconductors and their chokepoints
+summary: Why leading-edge AI chips come from so few places. EUV lithography has one supplier, fabs compound their lead through yield learning, HBM and advanced packaging became new chokepoints, and Nvidia's software ecosystem makes its chips hard to route around.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [value-chain]
+related: [gpu, memory-wall, accelerators, export-controls, sovereign-ai]
+keywords: ["TSMC", "ASML", "EUV", "HBM", "CoWoS", "advanced packaging", "foundry", "CUDA", "SK hynix", "process node"]
+reviewed: 2026-09-29
+quiz:
+  - question: A wealthy government offers unlimited money to build a leading-edge logic fab within three years, and it can buy every tool it needs. What is most likely to stop it from matching the leader?
+    options:
+      - Nothing; with the tools in place, output matches the leader's
+      - Yield learning; the leader's processes embody years of accumulated fixes, so a new fab produces far fewer good chips per wafer for a long time
+      - The price of silicon
+      - Chip design software licences
+    answer: 1
+    explanation: Tools are necessary but not sufficient. A leading-edge process involves over a thousand steps that must be tuned together, and yields rise only as the fab runs wafers, finds defects and fixes them. The leader has done this for every generation, so its lead is measured in years that money alone cannot compress. Samsung's and Intel's struggles at recent nodes show this even for experienced chipmakers.
+  - question: Using the yield model in the figure, why do big AI dies make defect density matter much more than for phone chips?
+    options:
+      - Big dies use a different kind of silicon
+      - The chance a die has no killer defect falls exponentially with its area, so an 8 cm² die at a given defect density loses far more of its dies than a 1 cm² die
+      - Phone chips are tested less carefully
+      - Defects only occur at the edge of the wafer
+    answer: 1
+    explanation: With yield ≈ e^(−D₀·A), multiplying the area by eight multiplies the exponent by eight. At 0.1 defects per cm², a 1 cm² die yields about 90% but an 8 cm² die only about 45%. During an early ramp at 0.3 defects per cm², the big die falls below 10%. A fab's yield maturity is therefore worth most to AI accelerators.
+  - question: A startup designs an accelerator that is twice as fast as the market leader's on paper. Which obstacle does the bottleneck picture say is most immediate?
+    options:
+      - It must get scarce leading-edge wafers, packaging slots and HBM, which suppliers allocate to large customers with long commitments, and then persuade users to port their software
+      - Its chip will be illegal to sell
+      - It cannot patent its design
+      - Faster chips always need more power than data centers can supply
+    answer: 0
+    explanation: When links are scarce, suppliers allocate capacity rather than simply selling to whoever asks, and they favour large, reliable customers who commit years ahead. On top of that, most AI software is tuned for the leader's ecosystem. A better design has to route around several chokepoints at once, which is why new entrants usually start with a narrow niche or a single large customer.
+  - question: Why can the United States influence where a Dutch company sells its lithography machines?
+    options:
+      - The Netherlands is a US state for trade purposes
+      - The machines contain critical US-made components and technology, and the Dutch government has also coordinated its own controls with the US
+      - ASML is owned by the US government
+      - Lithography machines are made in the United States
+    answer: 1
+    explanation: Supply chains are layered, so a chokepoint has its own suppliers. EUV machines depend on components and technology with US origin, including the light source developed by a US subsidiary, which gives US rules reach. The Netherlands has also chosen to align its own export controls. Leverage flows from any link in the chain beneath a product, not just from the final seller.
+---
+
+Almost every advanced AI chip in the world passes through the same few buildings. The logic die is printed in Taiwan, on machines only one Dutch company can make, then packaged beside memory stacks from one of three suppliers, again in Taiwan. The design usually comes from one American company whose software most AI code is written for.
+
+That concentration is not an accident or a failure of competition policy. It follows from the economics of how chips are made. This lesson explains those economics, so that when you read about a new fab, an HBM shortage or a "CUDA alternative", you can judge how much it really changes.
+
+## The picture
+
+<Recall id="value-chain">
+
+The AI build-out is a chain of inputs. Output is capped by the scarcest link, and profits and leverage go to whoever controls a link that others cannot route around, a **chokepoint**. Margins are high where a link is both scarce and hard to replace, and thin where it is only one of the two.
+
+</Recall>
+
+Zoom into the chip part of that chain. Each step has a different number of credible suppliers and a different **time to replicate**: how long a determined rival with money would need to match the leader. That time, more than money, is what makes a link a chokepoint in semiconductors.
+
+<Figure
+  name="chokepoint-map"
+  title="Where a leading-edge AI chip is made"
+  caption="Designs, tools and materials flow into the logic fab and the memory makers. Logic dies and HBM stacks meet in advanced packaging, and the packaged chips go to server assembly. Four links are chokepoints: one or a handful of suppliers, years to replicate."
+  notice="The chokepoints are not the steps that cost the most per chip. They are the ones where the leader has a lead measured in years: a unique machine, an accumulated process, a stacked-memory technique."
+/>
+
+<KeyIdea>
+
+In semiconductors, a link is hard to route around when catching up takes **years of accumulated learning**, not just capital. Each chokepoint is a lead in time: decades for EUV machines, several years for a leading-edge process, a year or two for HBM and packaging. Money can shorten these gaps only slightly, which is why they carry high margins and why governments treat them as strategic.
+
+</KeyIdea>
+
+## Lithography: the machine only one company makes
+
+Chips are built up layer by layer, and each layer's pattern is projected onto the wafer by a lithography machine. Smaller features need shorter wavelengths of light. <Term id="euv-lithography">EUV lithography</Term> uses 13.5 nm light, produced by hitting tiny droplets of molten tin with a powerful laser tens of thousands of times a second. The light is so easily absorbed that it must travel in a vacuum and be steered by some of the smoothest mirrors ever made, supplied by Zeiss in Germany.
+
+ASML is the only company that sells EUV machines. Each costs on the order of \$150–200 million, and the newest "High-NA" version roughly twice that (as of mid-2026). It took about two decades of development and support from its largest customers to make the technology work. No competitor is close.
+
+EUV is not strictly required for every advanced chip. Older deep-ultraviolet (DUV) machines can print finer features by exposing the same layer several times (multi-patterning). But every extra pass adds cost, time and chances for defects. That lowers yields, the fraction of chips that work, and yields are where fabs make or lose money. The cost of routing around EUV therefore shows up as lower output and higher cost per good chip, a point that returns in <Preview id="export-controls">the export-controls lesson</Preview>.
+
+## Fabs: big fixed costs and a learning curve
+
+A leading-edge fab costs on the order of **\$20 billion** or more, and the equipment inside it goes out of date within a few years as new nodes arrive. A new **<Term id="process-node">process node</Term>** (the generation of manufacturing technology, labelled "3 nm", "2 nm" and so on) comes roughly every two to three years. So a foundry must sell enormous volumes quickly to pay back each generation.
+
+Then there is <Term id="die-yield">yield</Term>. A wafer carries dozens to hundreds of chips (dies), and random defects kill some of them. Early in a node's life, defect density is high. Engineers find and remove the causes one by one, and yield climbs. That learning is specific to the process and hard to transfer, so it gives the leader a lasting head start on every generation.
+
+<Figure
+  name="die-yield"
+  interactive
+  title="Why yield learning is worth most for AI chips"
+  caption="A 300 mm wafer tiled with dies. Each die survives if it has no killer defect, which happens with probability e^(−defect density × area). Switch between a phone-sized die and a near-reticle-sized AI die, and move the defect density from an early ramp to a mature process."
+  notice="At the same defect density the big AI die loses a far larger share of its dies. Cutting defect density matters much more to the cost of an AI accelerator than to a phone chip."
+/>
+
+<Example title="one wafer, two chips">
+
+Take a leading-edge wafer at roughly **\$20,000** (a rough 2025 figure for a 3 nm-class wafer; newer nodes are reported to cost more) and the simple model in the figure.
+- **Phone chip, 1 cm².** About 620 dies fit. At a mature 0.1 defects per cm², yield is $e^{-0.1} \approx 90\%$: about 560 good dies, or **\$36** of wafer cost each.
+- **AI die, about 8 cm²** (close to the largest a lithography machine can print in one exposure). About 67 dies fit. At 0.1 defects per cm², yield is $e^{-0.8} \approx 45\%$: about 30 good dies, or roughly **\$670** each.
+- **The same AI die during an early ramp,** at 0.3 defects per cm²: yield is $e^{-2.4} \approx 9\%$, about 6 good dies and over **\$3,000** each.
+
+A fab that is a year behind on yield learning is not slightly more expensive for big AI chips. It can be several times more expensive.
+
+</Example>
+
+This is why TSMC makes the large majority of the world's most advanced logic chips, and nearly all of the AI accelerators sold on the open market. Its customers include the chip designers that compete with each other; it does not sell chips of its own, which is the <Term id="fabless">fabless</Term>–foundry split that lets it serve everyone. Samsung and Intel both have leading-edge processes, but have struggled to reach competitive yields and to win large outside customers. Their difficulty is the learning curve made visible.
+
+## The new chokepoints: memory and packaging
+
+<Recall id="memory-wall">
+
+Chips can do arithmetic far faster than memory can supply numbers, so for many AI workloads, and especially for generating tokens, the speed limit is memory bandwidth rather than compute. High-bandwidth memory (HBM) places stacks of DRAM right beside the processor to raise that bandwidth.
+
+</Recall>
+
+That physics made two formerly obscure steps strategic.
+
+**HBM** is made by stacking eight to twelve DRAM dies (sixteen in the newest generations) and connecting them vertically through thousands of tiny holes. It uses more wafer area per bit than ordinary memory and has lower yields, and only three firms make it at scale: SK hynix (the early leader and Nvidia's main supplier), Samsung and Micron. HBM is among the most expensive components in an accelerator, and in 2024–25 its supply was reportedly sold out a year or more in advance.
+
+**<Term id="advanced-packaging">Advanced packaging</Term>** joins the logic die and the HBM stacks on a shared silicon base (an interposer), so that thousands of connections can run between them. The dominant version for AI chips is TSMC's CoWoS. Because a single die cannot grow beyond the largest area a lithography machine can print (the <Term id="reticle-limit">reticle limit</Term>, about 8.5 cm²), today's top accelerators put two logic dies and eight or more HBM stacks in one package. More compute per package now means more packaging, not just more wafers. CoWoS capacity was widely reported as the binding constraint on AI accelerators in 2023; TSMC roughly doubled it in 2024 and planned another large expansion for 2025, by its own and analysts' accounts.
+
+## The software moat
+
+The chip designer's position rests on something no fab can copy: software. Nvidia's CUDA platform, introduced in 2006, and the libraries built on it are what most AI code has been written and tuned for over nearly two decades. Researchers publish code that assumes it; frameworks support new features on it first; engineers know it. This <Term id="cuda-moat">CUDA moat</Term> means that a rival chip must be not just faster, but fast enough to justify porting and re-tuning software.
+
+The moat is real but not absolute. Frameworks such as PyTorch and compilers increasingly hide the hardware, AMD's software has improved, and Google trains its frontier models on its own TPUs. The pattern is that **large, vertically integrated buyers can route around the moat** because they control their whole software stack and can afford the engineering. Smaller buyers mostly cannot. That is why custom silicon appears mainly at the very largest buyers, while most others stay on the leader's chips.
+
+## Reason with it
+
+**Could a rich newcomer buy its way to a leading-edge fab in three years?** It could buy the tools (if export rules allow) and hire some talent. But yields rise only as a fab runs wafers and fixes defects, and the example shows what a yield gap costs for big dies. The newcomer would produce leading-edge chips at a large cost disadvantage for years, while the leader moves to the next node. Money is necessary but not sufficient; the scarce input is accumulated learning.
+
+**Why did HBM and packaging become chokepoints for AI chips, but not for phones?** Phone chips are small and fed by ordinary memory. AI chips need enormous memory bandwidth (from the memory-wall physics) and more silicon than one die can hold (from the reticle limit). Both needs are met by stacking memory and joining dies in advanced packages, so demand for those steps grew far faster than their capacity. The chokepoint followed the physics of the workload.
+
+**A startup designs a chip twice as fast as the leader's on paper. What stands in its way?** First, allocation. Leading-edge wafers, packaging slots and HBM are scarce, and suppliers allocate them to large customers who commit years ahead. Then, software: users must port and tune their code. A better design must route around several chokepoints at once, which is why new entrants usually start with one anchor customer or a narrow niche.
+
+## Where this picture breaks
+
+- **Chokepoints erode.** Samsung has worked to qualify its HBM with the largest buyers, Intel is ramping a new leading-edge process, and China is building domestic tools and memory. Leads in time shrink when rivals persist and demand is high enough to fund them.
+- **Chokepoints have their own suppliers.** ASML depends on Zeiss optics and on a US-developed light source; fabs depend on Japanese chemicals and specialty materials. The map is layered, which is why a country can hold leverage over a product it does not make.
+- **Not all chips are leading-edge.** Most chips by volume, in cars, appliances and power systems, use mature nodes that are made in many countries. The concentration described here applies to the top of the market, which is what matters for AI.
+- **Cost per chip is not the whole cost.** We counted wafer cost per die. A finished accelerator also carries HBM, packaging, testing and the designer's margin, and packaging failures can waste good dies and memory.
+
+## Why it matters in the feed
+
+When TSMC reports its capital spending or a new fab abroad, ask how many years of process learning come with it. When SK hynix, Samsung or Micron announce that HBM is sold out, or that a new generation has been qualified by Nvidia, the memory link is moving. When a lab or cloud announces a custom chip, read it as routing around the software moat for one very large buyer. And when a government names "semiconductors" as a security priority, this lesson's chokepoints are what it means.
+
+## Recap
+
+- Leading-edge AI chips depend on a few chokepoints: **EUV lithography** (one supplier), **leading-edge logic fabs** (in practice TSMC), **HBM** (three suppliers) and **advanced packaging** (mostly TSMC's CoWoS).
+- As in the value-chain lesson, those links combine scarcity with no quick substitute, and in chips the barrier is **time**: accumulated yield learning, not just capital.
+- **Yield falls exponentially with die area**, so process maturity matters most for big AI dies; the reticle limit pushes designers towards multi-die packages with HBM, making packaging and memory strategic.
+- **Software is a chokepoint too.** The CUDA ecosystem makes the leader's chips hard to replace for most buyers; the largest, vertically integrated buyers can route around it.

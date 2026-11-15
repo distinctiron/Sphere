@@ -1,0 +1,150 @@
+---
+id: inference
+title: Inference fundamentals
+summary: Why a chatbot pauses and then streams words. Prefill is compute-bound, decode is memory-bound, and the KV cache trades memory for speed. All three follow from asking what runs out first, arithmetic or bytes.
+minutes: 12
+model: feeding-the-math
+buildsOn: [memory-wall, attention, sampling]
+related: [serving-at-scale, hosting, gpu, unit-economics]
+keywords: ["inference", "KV cache", "prefill", "decode", "time to first token", "tokens per second", "memory bandwidth", "long context", "context window"]
+quiz:
+  - question: An 8-billion-parameter model in BF16 (16 GB of weights) runs alone on a GPU with 3.35 TB/s of memory bandwidth. Ignoring everything else, what is the fastest it can generate tokens for a single user?
+    options:
+      - About 20 tokens per second
+      - About 200 tokens per second
+      - About 2,000 tokens per second
+      - It depends only on the GPU's TFLOP/s, not on memory
+    answer: 1
+    explanation: Each decode step must stream all 16 GB of weights from memory to produce one token. 16 GB ÷ 3.35 TB/s ≈ 4.8 ms per token, so at most about 210 tokens per second. The arithmetic for one token takes about 0.02 ms, so it is memory, not compute, that sets the pace.
+  - question: Why do API providers usually charge several times more per output token than per input token?
+    options:
+      - Output tokens are longer words
+      - Input tokens are processed together in prefill, which reuses each weight across the whole prompt and keeps the GPU busy; output tokens are made one at a time in decode, which reads all weights per step while most arithmetic units wait
+      - Output tokens need a bigger model
+      - Input tokens skip the attention layers
+    answer: 1
+    explanation: In prefill, one pass over the weights does the work for thousands of tokens, so there is high arithmetic intensity and the GPU runs near its compute ceiling. Decode gets one token per sequence per pass, with low intensity, and is bound by memory. The same hardware-second produces far fewer output tokens than input tokens.
+  - question: A service doubles the context each user keeps (from 32k to 64k tokens) without changing anything else. What happens to decode?
+    options:
+      - Nothing, because the weights are the same size
+      - Each step gets slower and fewer users fit on the GPUs, because every step must also read each user's larger KV cache and the cache takes more memory
+      - It gets faster because more of the answer is cached
+      - Only prefill is affected
+    answer: 1
+    explanation: The KV cache grows linearly with context. Every decode step attends over all previous keys and values, so it reads the whole cache. A bigger cache means more bytes per step (slower tokens) and more memory per user (smaller batches), on top of the fixed weights.
+  - question: Using the attention lesson, why is it safe to cache keys and values, but not the query, of earlier tokens?
+    options:
+      - Queries are too large to store
+      - In a decoder, earlier tokens never change and cannot attend to later ones, so their keys and values stay the same at every later step; only the new token's query is needed to attend over them
+      - Keys and values are only used once
+      - Queries are recomputed by the sampler
+    answer: 1
+    explanation: Causal attention means token i only looks at tokens up to i, so its key and value vectors, in every layer, are fixed once computed. Each new step needs only the newest token's query, compared against all stored keys, to mix all stored values. Earlier queries are never used again.
+---
+
+Type a question into a chatbot and watch: there is a short pause, then the answer streams out word by word at a steady pace. Neither is a user-interface choice. The pause and the pace are two different physical regimes of the same hardware. Understanding them explains a surprising amount of what you read about AI:
+- why output tokens cost more than input tokens;
+- why "long context" is expensive;
+- why serving companies obsess over batching;
+- why memory bandwidth, not just FLOPs, sells GPUs.
+
+## The picture
+
+Hold on to this path's mental model: **arithmetic is cheap; moving data is what costs**. Every step of running a model has two parts. It **moves bytes**, the weights (and cached state) streamed from high-bandwidth memory to the arithmetic units. It **does math**, the multiply-adds of the forward pass. Whichever takes longer sets the speed.
+
+<Recall id="memory-wall">
+
+The roofline: a workload's *arithmetic intensity* is the number of operations it performs per byte it moves. Below the GPU's ridge point (for an H100-class chip, roughly 990 TFLOP/s ÷ 3.35 TB/s ≈ 300 FLOPs per byte), the chip is **memory-bound**: the arithmetic units sit idle waiting for data. Above it, the chip is **compute-bound**.
+
+</Recall>
+
+<Term id="inference">Inference</Term> for a language model has two phases that sit on opposite sides of that ridge:
+- **<Term id="prefill">Prefill</Term>** reads your whole prompt at once. Each weight streamed from memory is used for *every* prompt token, so the intensity is high and the chip is compute-bound.
+- **<Term id="decode">Decode</Term>** generates the answer one token per step. Each full pass over the weights produces one token per sequence, so the intensity is tiny and the chip is memory-bound.
+
+<Figure
+  name="prefill-decode"
+  title="Same weights, same pipe, very different work per byte"
+  caption="Top: during prefill one stream of weights feeds thousands of prompt tokens, and the arithmetic units are nearly all busy. Bottom: during decode the same stream yields a single new token, and most arithmetic units wait."
+  notice="The pipe from memory runs at the same speed in both rows. Only the amount of useful work per byte changes, and with it which side of the roofline you are on."
+/>
+
+<KeyIdea>
+
+**Prefill** is limited by arithmetic: it is fast per token and sets the pause before the first word. **Decode** is limited by memory bandwidth: every token requires streaming all the weights (and the growing cache) again, and it sets the pace of the stream. Almost every inference optimisation attacks one of these two limits.
+
+</KeyIdea>
+
+## Why decode must go one token at a time
+
+<Recall id="sampling">
+
+Generation is autoregressive. The model outputs a probability distribution over the next token, one token is sampled from it and appended, and the extended sequence is fed back in to produce the next distribution. Token $t+1$ cannot be chosen until token $t$ exists.
+
+</Recall>
+
+That dependency is what makes decode sequential. You cannot compute the tenth word of the answer in parallel with the first, because the tenth depends on the nine before it. So every step is a full forward pass that produces just one new token per sequence. From the forward pass, that step costs about $2P$ FLOPs for a model with $P$ parameters, and it needs all $2P$ bytes of BF16 weights to arrive from memory.
+
+<Example title="an 8B model on one GPU">
+
+Weights: $8 \times 10^9$ parameters × 2 bytes = **16 GB**.
+
+- **Decode, one user.** Moving 16 GB at 3.35 TB/s takes about **4.8 ms**. The math, $2 \times 8 \times 10^9 = 16$ GFLOP at 990 TFLOP/s, takes about **0.016 ms**. The GPU spends about 99.7% of each step waiting on memory, so the ceiling is about **210 tokens per second**.
+- **Prefill, a 2,000-token prompt.** The math is $2 \times 8 \times 10^9 \times 2000 = 32$ TFLOP, about **32 ms**. The weights still only need to stream once (about 4.8 ms), so the arithmetic is now the slower part. The whole prompt is read in about the time it takes to generate seven output tokens.
+
+</Example>
+
+The arithmetic intensity of a decode step is simple to read off: $2PB$ FLOPs for $B$ sequences in the batch, divided by $2P$ bytes of weights, is **$B$ FLOPs per byte**. To reach the ridge point of about 300, you need a few hundred sequences decoding *together*, sharing each pass over the weights. That single fact is why serving systems batch many users' requests together. It is also why a quiet endpoint feels fast but is expensive per token: each pass over the weights serves only a few users.
+
+## The KV cache: memory spent to avoid recomputation
+
+<Recall id="attention">
+
+In each attention layer, every token produces a query, a key and a value vector. A token's output mixes the values of the tokens it attends to, weighted by how well its query aligns with their keys. In a decoder, a token attends only to itself and earlier tokens.
+
+</Recall>
+
+Consider step $t$ of decode. The new token needs to attend over all $t-1$ earlier tokens, in every layer. Their keys and values do not depend on anything that comes later: causal attention never lets an earlier token see a later one. So instead of recomputing them at every step, the server stores them. This store is the <Term id="kv-cache">KV cache</Term>, holding keys and values for every token, in every layer, for every sequence being served. Each decode step then computes K and V for just the new token, appends them to the cache, and attends over the whole cache.
+
+The price is memory, and memory traffic. Per token, the cache holds
+
+$$
+\text{KV bytes per token} = 2 \times \text{layers} \times \text{KV heads} \times \text{head dim} \times \text{bytes per number}.
+$$
+
+For a 70B-class model with 80 layers, 8 KV heads of dimension 128, in BF16, that is $2 \times 80 \times 8 \times 128 \times 2 \approx 0.33$ MB per token. A single 128k-token conversation holds about **42 GB** of cache, more than half of an 80 GB GPU for one user. Every decode step must read that user's cache as well as the weights.
+
+<Figure
+  name="kv-cache-calculator"
+  interactive
+  title="What one decode step has to read"
+  caption="Pick a model, a context length per user and a number of users decoding together. The bar shows weights plus KV cache against 80 GB GPUs. The readout applies the roofline to one decode step: bytes read ÷ bandwidth versus FLOPs ÷ compute."
+  notice="Raise the batch at a short context: total throughput climbs almost linearly while per-user speed barely drops. Then raise the context: the cache, not the weights, becomes what every step waits on."
+/>
+
+## Reason with it
+
+**Why is time-to-first-token mostly about your prompt, and time-per-token mostly about the model's size?** <Term id="ttft">Time to first token</Term> is dominated by prefill, which is compute-bound, so it scales with prompt length × parameters ÷ FLOP/s (plus any queueing). Time per output token is a decode step, which is memory-bound, so it scales with bytes read ÷ bandwidth: weights plus cache. A long prompt to a small model pauses before it starts; a short prompt to a huge model starts quickly and then streams slowly.
+
+**Why can a provider serve 100 users for only a little more than the cost of one?** In decode, the expensive part of each step is streaming the weights, and that cost is shared by every sequence in the batch. Adding users mostly adds their KV-cache reads and a sliver of arithmetic. Throughput therefore rises almost linearly with batch size, until the cache fills memory or the step crosses the roofline and becomes compute-bound. The economics of inference live in that gap.
+
+**Why does "prompt caching" make repeated system prompts cheap?** The KV cache of a prefix depends only on that prefix. If many requests start with the same 20,000-token instructions, the server can keep their keys and values and skip that part of prefill entirely. Providers pass the saving on as a discounted "cached input" price.
+
+## Where this picture breaks
+
+- **Attention's own cost grows with context.** We counted weight bytes and cache bytes. In prefill, attention also does work that grows with the *square* of the prompt length, so very long prompts become expensive even in the compute-bound phase. Kernels like FlashAttention exist to keep that work from turning into extra memory traffic.
+- **Not every parameter is read every step.** Mixture-of-experts models route each token through only a few expert blocks, so a decode step reads a fraction of the weights. The picture still holds, but "bytes per token" must count only the active parameters.
+- **One GPU is an idealisation.** Big models are split across many GPUs, which adds communication between chips: another pipe with its own bandwidth. The calculator assumes perfect scaling; real systems lose a meaningful share to overheads.
+- **Serving tricks change the ratios, not the physics.** <Preview id="serving-at-scale">Continuous batching, paged caches, quantisation and speculative decoding</Preview> are all ways of getting more tokens per byte moved. They are the subject of the next lesson.
+
+## Why it matters in the feed
+
+When a lab announces a million-token context window, read it through the cache arithmetic: it is a memory and bandwidth commitment per user, not just a model feature. When a new GPU is launched with more HBM capacity and bandwidth rather than more FLOPs, this lesson explains why buyers care: decode-heavy inference is bandwidth-bound. And when API price sheets show output tokens at several times the price of input tokens, with cached input cheaper still, you are looking at prefill and decode on either side of the roofline.
+
+## Recap
+
+- Inference has two regimes. **Prefill** reads the prompt in parallel and is compute-bound. **Decode** produces one token per sequence per step and is memory-bound. This is the memory-wall roofline applied to a model.
+- Decode is sequential because generation is autoregressive, as the sampling lesson showed: each token depends on all earlier ones.
+- A decode step's arithmetic intensity is about the **batch size** (FLOPs per byte of weights), which is why serving batches many users together.
+- The **KV cache** stores each earlier token's keys and values. That is safe because causal attention never changes them, and it trades memory for recomputation. It grows linearly with context and is read on every step.
+- Time to first token follows prompt length and compute. Time per token follows bytes read and bandwidth.

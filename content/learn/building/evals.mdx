@@ -1,0 +1,171 @@
+---
+id: evals
+title: Evals
+summary: Why evaluations are the unit tests of AI products, and why they must be measurements rather than assertions. Golden sets, graders including LLM judges and their biases, sample sizes, pass@k versus pass^k, regressions across model versions, and why public leaderboards mislead.
+minutes: 12
+model: context-machine
+buildsOn: [sampling, agent-loop]
+related: [pretraining, post-training, context-engineering, rag, harness-engineering, skills-mcp]
+keywords: ["evals", "evaluation", "benchmark", "LLM-as-a-judge", "pass@k", "leaderboard", "benchmark contamination", "SWE-bench", "golden dataset", "regression testing"]
+quiz:
+  - question: On a 100-case eval, a prompt change moves the score from 78% to 81%. What can you conclude?
+    options:
+      - The new prompt is better; ship it
+      - Very little. With 100 cases each score is uncertain by roughly ±8 points, so a 3-point change is within the noise; compare case by case, add cases, or rerun
+      - The new prompt is worse, because small improvements are usually noise
+      - The grader must be broken
+    answer: 1
+    explanation: A score from n independent cases has a 95% margin of about 1.96·√(p(1−p)/n), which is about ±8 points at n = 100 and p ≈ 0.8. Detecting a 3-point gap reliably takes thousands of cases, or a paired comparison that looks at which of the same cases flipped.
+  - question: A support agent must handle each customer correctly every time; there is no second chance. It succeeds on a task 90% of the time per attempt. Which number describes the risk of deploying it on a task customers bring 3 times?
+    options:
+      - pass@3 ≈ 99.9%, the chance that at least one of three attempts succeeds
+      - 90%, since attempts do not affect each other
+      - 30%, three times the failure rate
+      - pass^3 ≈ 73%, the chance that all three attempts succeed
+    answer: 3
+    explanation: pass@k fits settings where a verifier can pick a successful attempt, like code with tests. When every attempt reaches a customer, what matters is succeeding every time, pass^k = p^k = 0.9³ ≈ 0.73, the same compounding as in the agent loop.
+  - question: In pairwise comparisons, an LLM judge prefers whichever answer is shown first in a large share of cases, regardless of content. What is the standard fix?
+    options:
+      - Judge every pair in both orders and count only verdicts that agree (treating disagreement as a tie), and check the judge against human labels on a sample
+      - Use a larger judge model and trust it
+      - Always put your preferred answer first
+      - Replace pairwise comparison with a 1-to-10 score, which has no biases
+    answer: 0
+    explanation: Position bias is a known failure of LLM judges, alongside a preference for longer answers and for text in their own style. Swapping order cancels position effects, and agreement with human labels on a sample tells you whether the judge measures what you care about.
+  - question: Using pretraining, why might a model score far higher on a benchmark published years ago than on a freshly written set of equally hard questions?
+    options:
+      - Old benchmarks are always easier
+      - Newer questions use a different tokenizer
+      - Pretraining corpora are scraped from the web, where old benchmark questions and answers circulate, so the model may partly remember them; the fresh set measures actual capability
+      - Models forget old material over time
+    answer: 2
+    explanation: Contamination turns a capability test into a memory test. Fresh, private or regularly rotated test sets, and checks for verbatim recall, are the defences.
+---
+
+Every change to an AI product can make some things better and others worse: a reworded system prompt, a new model version, a different number of retrieved passages, one more tool. You cannot see which by trying a few examples, because the system is random and its inputs are endless. **Evaluations**, or evals, are how teams actually know. They play the role unit tests play in ordinary software, and they differ from unit tests in one essential way: they are measurements, not assertions.
+
+This lesson builds that measuring instrument, and explains why the benchmark scores that fill the news are so easy to misread.
+
+## The picture
+
+In this path's picture, the model is a function from context to a *distribution* over outputs, and the product is a harness wrapped around it. What you ship is therefore not a behaviour but a **rate**: how often the whole system does the right thing across the tasks people bring to it.
+
+<Recall id="sampling">
+
+Each output token is sampled from the model's predicted distribution, so the same context can yield different continuations. Temperature sets how spread out that sampling is. Only fully greedy decoding is (nearly) repeatable.
+
+</Recall>
+
+<Recall id="agent-loop">
+
+An agent is a model calling tools in a loop. Because every call samples, each run follows its own path, and small per-step error rates compound over many steps. Agent quality is a success rate over many runs, not a property of one run.
+
+</Recall>
+
+An <Term id="eval">eval</Term> estimates that rate by sampling it. It has three parts: a set of **cases** that represent the job, a **grader** that decides whether each output is acceptable, and **enough runs** to see through the noise.
+
+<KeyIdea>
+
+An eval is a measurement of how often your system does the right thing on the tasks you care about. It is only as good as three things: whether its cases **represent real use**, whether its grader **agrees with what you actually want**, and whether it has **enough cases** to see the difference you are trying to detect.
+
+</KeyIdea>
+
+## Cases and graders
+
+**Cases.** A <Term id="golden-set">golden set</Term> is a curated collection of inputs, each with a reference answer or a description of what a good answer must do. The best cases come from reality: logs of real requests, the hard cases users complain about, and every bug you have ever fixed. Each fixed failure becomes a case, so the suite doubles as a regression test. For Sphere's paper chat, a case might be a paper, a question and the passage that holds the answer.
+
+**Graders**, from the most to the least reliable:
+
+- **Code.** Exact match, a schema that validates, tests that pass, a number within tolerance. For RAG, code can check that every cited [n] refers to a passage that was actually provided and that the right passage was retrieved at all. Use code wherever the requirement can be stated precisely.
+- **Humans.** The ground truth for judgment calls such as helpfulness, tone and correctness of subtle claims, but slow and costly. Use them to build and audit the other graders.
+- **Models.** <Term id="llm-as-judge">LLM-as-a-judge</Term> means asking a model to grade an output against a rubric. It scales like code and handles open-ended answers like a human, but it has systematic biases. Judges tend to favour whichever answer is shown first (position bias), longer answers (verbosity bias) and text in their own model family's style (self-preference). The remedies follow from knowing this. Ask narrow yes-or-no questions ("does the answer state the paper's dataset size?") rather than for a score out of ten. Judge pairs in both orders. And measure how often the judge agrees with human labels on a sample before trusting it.
+
+## How many cases?
+
+A score from $n$ independent cases is itself a sample. For a true success rate $p$, the measured rate typically lands within
+
+$$
+\pm 1.96 \sqrt{\frac{p\,(1-p)}{n}}
+$$
+
+of the truth (95% of the time). This is the most ignored formula in AI product work.
+
+<Figure
+  name="eval-noise"
+  interactive
+  title="How much of a score is noise?"
+  caption="Two versions of a system whose true accuracies differ by a few points. Each dot is the score you would measure by running the eval on a fresh random sample of n cases; the shaded bar is the 95% range. Move the number of cases and the size of the true gap."
+  notice="At 100 cases the two clouds overlap almost completely for a 3-point gap: a rerun could easily show version A winning. The gap only separates from the noise at thousands of cases."
+/>
+
+<Example title="a 100-case eval">
+
+At $p = 0.8$ and $n = 100$, the margin is $1.96 \times \sqrt{0.8 \times 0.2 / 100} = 1.96 \times 0.04 \approx 0.078$: about **±8 points**. A prompt change that moves the score from 78% to 81% has told you almost nothing. Detecting a 3-point improvement reliably takes on the order of 2,500 cases per version.
+
+Two cheaper routes exist. A **paired comparison** runs both versions on the *same* cases and looks only at cases whose result flipped, which removes the variation between cases. And **rerunning** each case several times separates the model's own randomness from the difficulty of the cases.
+
+</Example>
+
+## Measuring agents: pass@k and pass^k
+
+For agents and code, each case is usually attempted several times, because each attempt samples a different path. Two summaries answer two different questions.
+
+- <Term id="pass-at-k">pass@k</Term>: the chance that **at least one** of $k$ attempts succeeds, $1 - (1-p)^k$. That is the right measure when something can pick the winner: generated code that must pass tests, or a proof a checker verifies.
+- **pass^k**: the chance that **all** $k$ attempts succeed, $p^k$. That is the right measure when every attempt reaches a user, as with a support agent or a booking agent. It is the compounding from the agent loop, with attempts in place of steps.
+
+<Figure
+  name="pass-at-k"
+  interactive
+  title="Same agent, opposite stories"
+  caption="From one per-attempt success rate, pass@k (at least one of k attempts succeeds) rises towards 100% while pass^k (all k succeed) falls towards zero."
+  notice="At 60% per attempt and k = 5, the same agent can be reported as 99% (pass@5) or 8% (pass^5). Always ask which one a headline number is."
+/>
+
+## Regressions, cost and latency
+
+A new model version is better *on average*; that says little about *your* cases. Prompts were tuned against the old model (as context engineering warned), and a model that follows instructions more literally can break a carefully balanced prompt. So the eval suite is what makes upgrades safe: run it on the candidate before switching, and read the failures, not just the score.
+
+Quality is only one axis. Record **cost and latency per case** too, because every choice trades them. A larger model might add two points at five times the price and twice the wait. A cheaper model with a verifier and one retry might match it. Retrieving eight passages instead of four might cost more than it gains. An eval that tracks all three turns these arguments into measurements.
+
+## Benchmarks and leaderboards
+
+Public benchmarks, fixed sets of tasks with published scores, are the evals everyone shares. They are useful as a coarse filter and misleading as a verdict.
+
+<Recall id="pretraining">
+
+Pretraining trains a model to predict the next token over trillions of tokens of text scraped largely from the public web. Whatever circulated widely online before the data was collected, the model has probably read, and deduplication does not catch every copy or paraphrase.
+
+</Recall>
+
+- **Contamination.** Benchmark questions and their answers circulate online and end up in pretraining data. A model may then partly *remember* answers, and its score measures memory rather than skill. This is <Term id="benchmark-contamination">benchmark contamination</Term>. Fresh, private or regularly rotated test sets are the defence.
+- **Optimisation pressure.** Once a benchmark matters, labs tune for it, and the score stops tracking the broader ability it was meant to indicate.
+- **The harness is part of the score.** As harness engineering showed, the same model can score very differently depending on its tools, prompts and retry policy. Two numbers from different harnesses are not comparable.
+- **Preference is not correctness.** Leaderboards built on people voting between two answers measure what people *prefer*, which rewards style and length as well as substance.
+- **It is not your distribution.** A benchmark samples someone else's tasks. Your users bring theirs.
+
+## Reason with it
+
+**A model tops a public leaderboard but underperforms on your product. How can both be true?** The leaderboard measured a different distribution of tasks, possibly contaminated, with a different harness and grader. Your eval measures your tasks, with your harness, graded by what you need. When they disagree, yours is the one that predicts your users' experience, provided it has enough cases.
+
+**Why is an LLM judge that agrees with itself 99% of the time not necessarily a good judge?** Consistency is not validity. A judge can reliably prefer longer answers, or answers in its own style, every single time. The only test of whether it measures what you care about is agreement with trusted labels, usually from humans, on a sample. Check that before and after changing the judge's prompt or model.
+
+**Why should the eval set keep growing after launch?** Each production failure is a case your suite did not contain. Adding it does two things: it measures the fix, and it guards against the same failure coming back with the next prompt or model change. Over time the suite comes to represent the real distribution, rather than the one you imagined before launch.
+
+## Where this picture breaks
+
+- **The margin formula is optimistic.** It assumes independent cases and a perfect grader. Real cases cluster (twenty questions about one paper are not twenty independent draws), and graders make errors of their own, so true uncertainty is larger.
+- **Evals only see what you thought to include.** Novel failures in production show up in logs and user reports first. Monitoring is the complement to evaluation, not a replacement.
+- **Measure something enough and it gets optimised.** A team that tunes prompts against the same cases for months will <Term id="overfitting">overfit</Term> them. Keep a held-out set that is rarely looked at.
+- **Some qualities resist grading.** Whether an explanation *teaches*, or a tone feels right, can be approximated by rubrics and judges but not pinned down. Human review remains part of the loop.
+
+## Why it matters in the feed
+
+When a lab announces state of the art on a benchmark, ask which harness it used, how many attempts it allowed (pass@1 or pass@k), whether the test set could be in its training data, and how big the gap is relative to the benchmark's noise. When an arena ranking reshuffles, remember it measures preference. When a company says a new model "broke" its product, that is a regression its eval suite either caught or should have.
+
+## Recap
+
+- Outputs are samples (as in the sampling lesson), so an eval measures a success rate. Its value depends on representative cases, a grader aligned with what you want, and enough cases.
+- Grade with code where possible, humans for ground truth, and LLM judges at scale, after checking them for position, length and self-preference bias against human labels.
+- A score from $n$ cases carries a margin of about $1.96\sqrt{p(1-p)/n}$: roughly ±8 points at 100 cases. Paired comparisons and reruns cut the noise.
+- pass@k fits settings with a verifier; pass^k fits settings where every attempt counts, the same compounding as in the agent loop.
+- Public benchmarks suffer from contamination via pretraining, optimisation pressure and harness differences. Your own eval, on your distribution, is the decision-maker.

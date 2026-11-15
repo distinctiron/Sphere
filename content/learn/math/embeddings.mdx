@@ -1,0 +1,179 @@
+---
+id: embeddings
+title: Tokens & embeddings
+summary: How text becomes geometry. Text is cut into subword tokens, each token id picks one row of a learned table, and that row is a point in a space where training has placed related pieces of language near each other and turned relations into directions.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [vectors, matrices, gradient-descent]
+related: [forward-pass, attention, transformer, rag]
+keywords: ["tokenizer", "tokenization", "tokens", "embedding", "embeddings", "word2vec", "vocabulary size", "byte-pair encoding", "embedding model"]
+quiz:
+  - question: A language model reliably answers questions about strawberries but miscounts the letter r in “strawberry”. Using this lesson, what is the most likely reason?
+    options:
+      - The model has too few parameters to count
+      - The model never sees letters, only token ids such as “str”, “aw”, “berry”, so spelling is only available if the embeddings happened to learn it
+      - Counting requires a calculator tool that is switched off
+      - The word is too rare to have an embedding
+    answer: 1
+    explanation: The model’s input is a sequence of token vectors, not characters. Nothing in the vector for “berry” spells it out; the model can only know how many r’s it contains if training pushed that fact into the geometry. Meaning is well represented because it helps predict text; spelling rarely does.
+  - question: Two tokens almost never appear in the training data, but always in the same kinds of sentences as each other. Where will training tend to put their embedding vectors?
+    options:
+      - Exactly where they were initialised, because rare tokens receive no updates
+      - Nudged towards the same region, but only slightly, so they stay close to their random starting points
+      - Far apart, to keep them distinguishable
+      - At the origin
+    answer: 1
+    explanation: Each time a token appears, gradient descent nudges its row toward whatever helps predict its context, and similar contexts give similar nudges. Rare tokens get few nudges, so they move only a little from their random start. Tokens that almost never appear can stay near random, which is behind the “glitch token” oddities seen in early models.
+  - question: A model has a 128,000-token vocabulary and hidden size 4,096. You double the vocabulary to 256,000. What happens to the embedding table, and to the length of a typical English prompt in tokens?
+    options:
+      - The table doubles to about 1 billion parameters, and prompts get somewhat shorter because more multi-character pieces become single tokens
+      - The table stays the same size, and prompts get longer
+      - The table doubles, and prompts get exactly half as long
+      - Only the hidden size changes
+    answer: 0
+    explanation: The table has one row of 4,096 numbers per token, so 128k × 4,096 ≈ 0.52 B parameters becomes about 1.05 B. More vocabulary lets the tokenizer keep more frequent strings whole, so the same text needs fewer tokens, but the gain is modest because the extra entries are rarer strings.
+  - question: Using meaning-as-geometry, why does moving from a 64-dimensional embedding to a 4,096-dimensional one help a language model, and why doesn’t 1,000,000 dimensions help more?
+    options:
+      - More dimensions give more independent directions in which distinctions can be stored; beyond what the data and the rest of the network can use, extra dimensions add cost (every layer scales with the square of the width) without new distinctions to store
+      - More dimensions make every vector longer, which improves accuracy without limit
+      - It only helps memory, not quality
+      - Dimensions only matter for images
+    answer: 0
+    explanation: Each dimension is an axis of nuance, so a wider space can keep more relations apart without interference. But the space is only useful if training data supplies distinctions to fill it, and the weight matrices of every layer grow with the square of the width, so compute and memory rise much faster than the benefit.
+---
+
+Everything in the first nine lessons of this path operated on vectors: lists of numbers that a network moves and folds. Language arrives as text. Before a model can do anything with “The unfriendliest cat”, the text has to become vectors, and *how* it becomes vectors shapes a surprising amount of what you read about models: why prices are quoted per token, why models stumble on spelling and arithmetic, why some languages cost more to process, and why “embedding models” power search.
+
+This lesson follows text through two steps. First it is cut into **tokens**. Then each token is replaced by a learned **embedding** vector, a point in a space where, after training, position carries meaning.
+
+## The picture
+
+Take this path’s mental model literally. The model owns a map of its entire <Term id="vocabulary">vocabulary</Term>: every token has a learned location in a space of a few thousand dimensions. Reading text means looking up each token’s location. Training has arranged the map so that pieces of language that behave alike sit near each other, and so that consistent relations between pieces (singular to plural, country to capital) become consistent **directions**.
+
+<Figure
+  name="embedding-lookup"
+  title="From text to points in space"
+  caption="The text is split into tokens, each token has an id, each id selects one row of the embedding table, and that row is the token’s point in space. Nearby points belong to tokens that play similar roles: function words, word pieces, animals."
+  notice="Nothing is computed during the lookup: each id simply selects a row. All the meaning is in where training has put the rows."
+/>
+
+<KeyIdea>
+
+An embedding is a token’s learned position in meaning-space. Nobody designs the positions: training moves each token’s vector wherever it best helps predict the text around it, and similar contexts produce similar nudges. So similarity of use becomes nearness, and consistent relations become consistent directions.
+
+</KeyIdea>
+
+## Cutting text into tokens
+
+A model needs a fixed list of symbols. Whole words are a poor choice: the list would need millions of entries and would still meet names, typos and code it has never seen. Single characters are the opposite extreme: any text can be written with them, but each character carries almost no meaning, and sequences become several times longer. That matters, because the cost of every later step grows with sequence length.
+
+Modern models use subword <Term id="token">tokens</Term>, which are the middle ground. The most common scheme, <Term id="byte-pair-encoding">byte-pair encoding</Term> (BPE), is built from data:
+
+1. Start with the 256 possible bytes, so any text at all can be represented.
+2. Find the pair of adjacent symbols that occurs most often in a large corpus, and merge it into a new symbol.
+3. Repeat until the vocabulary reaches its target size, typically 30,000 to 250,000 entries.
+
+Frequent strings end up as single tokens (“ the”, “ cat”, often with their leading space). Rare words are spelled from pieces (“ un” + “friend” + “li” + “est”). This process of <Term id="tokenization">tokenization</Term> is fixed before the model is trained, and the model never sees the characters again. For English, one token averages about four characters, or roughly three quarters of a word.
+
+<Caution>
+
+Tokens are cut by frequency, not by meaning. “ un” happens to be a meaningful prefix, but “li” + “est” is an accident of the corpus statistics. The model has to *learn* that “unfriendliest” relates to “friend”. Nothing in the ids says so.
+
+</Caution>
+
+## From id to vector: a lookup is a matrix
+
+Each token id now needs a vector. The model stores one row of $d$ numbers per token in an **embedding matrix** $E$ with $V$ rows (the vocabulary size) and $d$ columns (the model’s width). The <Term id="embedding">embedding</Term> of token $i$ is simply row $i$.
+
+<Recall id="matrices">
+
+A matrix times a vector is a weighted mix of the matrix’s columns, with the vector’s entries as the weights (the column picture). If the vector is all zeros except for a single 1, the mix picks out exactly one column. Written the other way round, with a row vector on the left, the same trick picks out one row.
+
+</Recall>
+
+So the lookup is not a special operation. Write token $i$ as a **one-hot** vector $\mathbf{e}_i$ of length $V$, with a 1 in position $i$ and zeros elsewhere. Then $\mathbf{e}_i E$ is row $i$. The embedding table is an ordinary weight matrix, the first layer of the network, and it is learned the same way as every other layer. (In practice the model indexes the row directly, since multiplying by thousands of zeros would be wasteful.)
+
+<Recall id="gradient-descent">
+
+Training repeatedly nudges every parameter a small step in the direction that lowers the loss, the negative gradient.
+
+</Recall>
+
+The rows of $E$ are parameters, so they start random and are nudged by gradient descent. Only the rows of tokens that appear in a batch receive nudges. A token that almost never appears in the training data barely moves from its random start, which is why early models sometimes behaved bizarrely when fed such “glitch tokens”.
+
+<Example title="a five-token vocabulary">
+
+Take $V = 5$ tokens (the, cat, dog, sat, ran) and $d = 3$. After some training the table might hold
+
+| token | row of $E$ |
+|---|---|
+| the | $(0.1,\ -0.2,\ 0.9)$ |
+| cat | $(0.8,\ 0.6,\ 0.1)$ |
+| dog | $(0.7,\ 0.7,\ 0.2)$ |
+| sat | $(-0.5,\ 0.4,\ 0.3)$ |
+| ran | $(-0.4,\ 0.6,\ 0.2)$ |
+
+“cat” is token 2, so its one-hot vector is $(0, 1, 0, 0, 0)$, and multiplying it by $E$ returns $(0.8, 0.6, 0.1)$.
+
+Now compare directions. The cosine between cat and dog is $\tfrac{0.56 + 0.42 + 0.02}{1.005 \times 1.010} \approx 0.985$: they point almost the same way. The cosine between cat and the is about $0.05$: nearly perpendicular. Nobody told the model that cats and dogs are alike. In the training text both are followed by words like “sat” and “ran”, so the same gradients pushed their rows the same way.
+
+At real scale: a vocabulary of 128,256 tokens with $d = 4{,}096$ gives $128{,}256 \times 4{,}096 \approx 525$ million parameters, about 6.5% of an 8-billion-parameter model.
+
+</Example>
+
+## Why meaning becomes direction
+
+<Recall id="vectors">
+
+A vector is a direction and a length. The dot product measures how much two vectors point the same way, and cosine similarity is the dot product with the lengths divided out: 1 for the same direction, 0 for perpendicular. Each dimension is an axis along which a representation can express nuance.
+
+</Recall>
+
+Why would training place similar tokens near each other? Everything the network computes downstream is a smooth function of the input vectors: moves and folds, as in <LessonLink id="forward-pass" />. If “cat” and “dog” are followed by similar words in similar sentences, then whatever vector helps predict text after “cat” also helps after “dog”. Every gradient step pushes both rows toward the same useful region, so they end up close. This is the old linguistic idea that you know a word by the company it keeps, turned into geometry by gradient descent.
+
+The same argument explains **directions**. If many pairs differ in the same way (cat and cats, dog and dogs, house and houses), the downstream network benefits from representing “plural” consistently, as one offset it can read regardless of the noun. So the offset from singular to plural tends to be roughly the same vector everywhere, and vector arithmetic works: cats − cat + dog lands near dogs. The famous example is king − man + woman ≈ queen, first shown with *word2vec* embeddings in 2013.
+
+<Figure
+  name="embedding-directions"
+  interactive
+  title="Relations are directions"
+  caption="Each view shows one relation. Word pairs related the same way are joined by nearly parallel arrows. Pick a word: the dashed arrow adds the reference offset (for example woman − man) to it, and the ring shows where it lands."
+  notice="Irregular pairs like child → children still follow the direction. The relation is learned from how words are used, not from their spelling."
+/>
+
+Hold this carefully. The analogy test excludes the three input words from the answer; without that rule the nearest vector is often the starting word itself. Many relations are only approximately linear, and the tidy examples are the ones that work. What survives the caveats is the important part: **features of meaning tend to be directions**, not individual coordinates. No single dimension means “plural”; a direction made of many dimensions does.
+
+## Why dimension matters
+
+The width $d$ is the number of independent axes available. A 2-D map can keep only two relations truly independent; with $d = 4{,}096$ there is room for thousands. High-dimensional space is also roomier than intuition suggests. Directions that are *nearly* perpendicular (a cosine within a few hundredths of 0) barely interfere with each other, and the number of such directions grows exponentially with $d$. Models exploit this to store far more features than they have dimensions, at the price of a little crosstalk, the superposition met in the vectors lesson.
+
+Width is not free, though. The table costs $V \times d$ parameters, and every weight matrix inside the model grows with $d^2$, as <Preview id="transformer">the transformer lesson</Preview> counts. Widening only helps while the data contains distinctions to fill the extra room.
+
+One thing embeddings do not carry at all is **order**. “Dog bites man” and “man bites dog” produce the same three vectors. Position has to be injected separately, which is the job of positional encoding in the transformer.
+
+## Reason with it
+
+**Why do models miscount the letters in “strawberry”?** The model receives token vectors, perhaps for “str”, “aw” and “berry”. Letters are not in the input; they are only known to the extent that training packed spelling into the geometry, and predicting ordinary text rarely needs it. For the same reason, numbers split into odd chunks (“1234” may become “123” + “4”) make digit-by-digit arithmetic harder than it looks.
+
+**Why does the same message cost more in some languages?** BPE merges the most frequent pairs in its training corpus, which is usually dominated by English. English words become single tokens; words in less-represented languages or scripts are spelled from many small pieces. The same sentence can take two to several times as many tokens. The user pays more per sentence, fits less text in the <Term id="context-window">context window</Term>, and each token carries less meaning. Newer tokenizers enlarge the vocabulary partly to fix this.
+
+**How can a search system find a document that shares no words with your query?** Specialised embedding models map a whole passage to one vector, trained so that texts with the same meaning point the same way. “Cheap flights to Rome” and “low-cost airfare, Italian capital” have almost no words in common but nearly the same direction, so a cosine search finds one from the other. This is the basis of <Preview id="rag">retrieval-augmented generation</Preview>.
+
+## Where this picture breaks
+
+- **One token, one vector, regardless of context.** “Bank” gets the same input embedding by a river and in a finance story. The embedding is only a starting point; the rest of the model rewrites each token’s vector using its neighbours. That is what <Preview id="attention">attention</Preview> does, and it is where most of the model’s meaning actually lives.
+- **2-D pictures are views, not maps.** Plots like the relations figure above are projections chosen to show one relation. Other relations are invisible or distorted in the same view, and distances in a projection can mislead badly.
+- **Analogies are cherry-picked.** Vector arithmetic works for some relations and fails for many others. Treat it as evidence that directions carry meaning, not as a reliable reasoning engine.
+- **The geometry reflects the data.** If the training text associates occupations with a gender, the embeddings encode that direction too. The picture explains why this bias appears; it does not make it acceptable.
+
+## Why it matters in the feed
+
+When a model card lists its vocabulary size, it is describing the rows of the embedding table and, indirectly, how many tokens your text will cost. When a lab launches an “embedding model” for search, it is selling the geometry of this lesson as a product. When a paper reports that a model has a linear “direction” for truthfulness or sentiment, it is the directions-as-features idea applied inside the model rather than at its input.
+
+## Recap
+
+- Text is cut into subword **tokens** by BPE, a frequency-driven compromise between words and characters. Token counts drive cost and context length.
+- Each token id selects one row of the embedding matrix. The lookup is a one-hot vector times a matrix, as in the matrices lesson, so the table is an ordinary learned layer.
+- Gradient descent moves rows so that tokens used in similar contexts point in similar directions, measured by the cosine similarity from the vectors lesson.
+- Consistent relations become consistent directions, which is why vector arithmetic sometimes works, and why features are directions rather than single coordinates.
+- Width sets how many distinctions fit. Embeddings carry no word order and no context: the transformer adds both.

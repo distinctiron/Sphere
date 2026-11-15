@@ -1,0 +1,194 @@
+---
+id: gradient-descent
+title: Gradient descent
+summary: Training as walking downhill. Every setting of a model's parameters is a location on a landscape whose height is the loss, and each step moves against the gradient. Learning rates, mini-batches, momentum and Adam all follow from that picture.
+minutes: 12
+model: loss-landscape
+buildsOn: [derivatives, probability]
+related: [neuron, forward-pass, backpropagation, training-in-practice, distributed-training]
+keywords: ["gradient descent", "stochastic gradient descent", "SGD", "learning rate", "optimizer", "optimiser", "Adam", "AdamW", "momentum", "loss curve", "batch size"]
+quiz:
+  - question: Near its minimum, a loss curves with curvature 50 along its steepest direction. Above roughly which learning rate will plain gradient descent stop settling into that minimum?
+    options:
+      - "0.02"
+      - "0.04"
+      - "0.5"
+      - "50"
+    answer: 1
+    explanation: Each step multiplies the distance to the minimum along that direction by (1 − ηk). Settling needs that factor to lie between −1 and 1, so η must stay below 2/k = 2/50 = 0.04. Between 1/k = 0.02 and 0.04 the steps overshoot and bounce back and forth, but the bounces still shrink. Above 0.04 they grow.
+  - question: You raise the mini-batch size from 256 to 1,024 examples. What happens to the random error in each gradient estimate?
+    options:
+      - It drops to a quarter
+      - It roughly halves
+      - It stays the same, because the average is unbiased either way
+      - It doubles, because more examples add more noise
+    answer: 1
+    explanation: The mini-batch gradient is an average of per-example gradients, and the spread of an average of B independent samples shrinks like 1/√B. Four times the batch gives 1/√4 = half the noise, at four times the compute per step. That diminishing return is why batch size is a trade-off rather than "bigger is always better".
+  - question: In a long, narrow valley, why does momentum reach the bottom in far fewer steps than plain gradient descent at the same learning rate?
+    options:
+      - It uses a larger learning rate automatically
+      - Its steps follow a running average of gradients, in which the across-valley components alternate in sign and cancel while the along-valley component points the same way every step and builds up
+      - It computes the exact position of the minimum
+      - It skips the gradient computation on some steps
+    answer: 1
+    explanation: In a narrow valley the gradient points mostly across the valley, and its across component flips sign each time the path crosses the floor. Averaging recent gradients cancels those flips. The small, consistent pull along the valley adds up, so the effective step along the valley grows (by up to 1/(1 − β), 10× for β = 0.9).
+  - question: Using cross-entropy from the probability lesson, a model gives the correct answer probability 0.9 on example A and 0.01 on example B. Which example pulls harder on the next gradient step?
+    options:
+      - A, because the model is more confident about it
+      - B, because its loss (surprise) is far higher and it changes steeply there, so the gradient from B is much larger
+      - Both equally, because every example is weighted the same in the average
+      - Neither, because only wrong answers count
+    answer: 1
+    explanation: The surprises are −ln 0.9 ≈ 0.11 and −ln 0.01 ≈ 4.6. For softmax with cross-entropy, the gradient with respect to the correct answer's logit is p − 1, which is −0.1 for A and −0.99 for B. Every example gets equal weight in the average, but a confidently wrong example contributes a gradient about ten times larger, so the landscape is steepest where the model is most wrong.
+---
+
+A freshly created network is a pile of random numbers, and its outputs are nonsense. After training, the same architecture translates languages or writes code. Nobody set those billions of numbers by hand. A single, almost embarrassingly simple rule adjusted them, trillions of times over: **find which way is downhill, and take a small step that way**.
+
+This lesson builds the second mental model of this path, the **loss landscape**. It is the picture you need to make sense of learning rates, batch sizes, "loss curves", training instabilities and every new optimiser paper.
+
+## The picture
+
+<Recall id="derivatives">
+
+The gradient $\nabla f$ collects the partial derivatives of a function into one vector. It points in the direction of steepest ascent, its length is the steepness, and it is perpendicular to the contour lines. For a small step $\Delta$, the function changes by about $\nabla f \cdot \Delta$, as long as the step is small enough for the surface to look flat.
+
+</Recall>
+
+Take every <Term id="parameters">parameter</Term> of a model (every weight and bias) and treat the whole list as the coordinates of a single point. A neuron with two inputs has three parameters, so each of its possible settings is a point in 3-D space. A 7-billion-parameter model is a point in a space with 7 billion dimensions. Now give every point a height: the <Term id="loss-function">loss</Term>, a single number saying how wrong the model is with those parameters on the training data.
+
+That is the <Term id="loss-landscape">loss landscape</Term>. Training is a walk across it:
+
+1. Start at a random point (random initial weights).
+2. Measure the slope where you stand: the gradient of the loss with respect to every parameter.
+3. Take a small step in the opposite direction, the locally steepest way down.
+4. Repeat, often millions of times.
+
+<Figure
+  name="descent-landscape"
+  interactive
+  title="Gradient descent on a one-parameter landscape"
+  caption="The curve is the loss for every value of a single parameter θ. At each step the ball measures the slope (amber) and moves by −η × slope. Change the learning rate and the starting point, and watch where it ends up."
+  notice="With small steps the ball crawls and settles in whichever valley it starts above, even the shallower one. Push η past about 0.44 and it can no longer settle in the narrow, deeper valley. From the left start it gets kicked out into the wider, shallower one."
+/>
+
+<KeyIdea>
+
+**Training is walking downhill on the loss landscape.** Every parameter setting is a location, the loss is the height, and each update is
+
+$$
+\theta \leftarrow \theta - \eta \, \nabla L(\theta).
+$$
+
+Everything else in this lesson is about three questions: how big a step to take (the learning rate $\eta$), how accurately to measure the slope (the batch), and how to use the slopes you have already seen (momentum and Adam).
+
+</KeyIdea>
+
+This is <Term id="gradient-descent">gradient descent</Term>. Notice what it does *not* need: a map of the landscape. It never sees more than the slope at its own feet. That makes it cheap enough to run in billions of dimensions, and it is also the root of every one of its limits.
+
+## Where the landscape comes from
+
+The landscape is not a property of the model alone. It is defined by the data.
+
+<Recall id="probability">
+
+A model outputs a probability distribution. Its surprise at the true outcome is $-\ln p$, and cross-entropy is the average surprise over many examples: it is the standard loss for classifiers and language models, lowest when the predictions match reality.
+
+</Recall>
+
+The training loss is an average over examples:
+
+$$
+L(\theta) = \frac{1}{N}\sum_{i=1}^{N} \ell_i(\theta), \qquad \nabla L(\theta) = \frac{1}{N}\sum_{i=1}^{N} \nabla \ell_i(\theta),
+$$
+
+where $\ell_i$ is the surprise on example $i$. Because the gradient of an average is the average of the gradients, each example casts a vote for the direction the parameters should move, and the step follows the average vote. The votes are not equal in size. An example the model already gets right with probability 0.9 has surprise $0.11$ and barely changes as the parameters move. One it gives probability 0.01 has surprise $4.6$ and a steep slope. The landscape is steepest where the model is most wrong, so the mistakes drive learning.
+
+Change the data and you change the landscape. Train on code and on poetry and you get different valleys. This will matter in <Preview id="training-in-practice">the gap between training loss and loss on new data</Preview>.
+
+How do you get the gradient for billions of parameters without nudging each one separately? That is the job of <Preview id="backpropagation">backpropagation</Preview>. For this lesson, assume the slope is simply available.
+
+## Step size: the learning rate
+
+The <Term id="learning-rate">learning rate</Term> $\eta$ is the one number that turns "which way is down" into "how far to move". It matters more than almost any other setting.
+
+<Example title="one parameter, four learning rates">
+
+Take the loss $L(w) = (w - 3)^2$, a bowl with its bottom at $w = 3$. Its slope is $L'(w) = 2(w - 3)$ and its curvature is 2. Start at $w = 0$.
+
+| $\eta$ | first steps of $w$ | distance to 3 each step | outcome |
+|---|---|---|---|
+| 0.1 | 0 → 0.6 → 1.08 → 1.46 | × 0.8 | steady approach |
+| 0.5 | 0 → 3 | × 0 | lands exactly on the bottom |
+| 0.9 | 0 → 5.4 → 1.08 → 4.54 | × (−0.8) | overshoots, bounces, still settles |
+| 1.1 | 0 → 6.6 → −1.32 → 8.18 | × (−1.2) | bounces further every time: diverges |
+
+Each step multiplies the distance to the bottom by $(1 - \eta k)$, where $k$ is the curvature, here 2. The walk settles only if that factor lies between −1 and 1, which means
+
+$$
+0 < \eta < \frac{2}{k}.
+$$
+
+Here that limit is $2/2 = 1$.
+
+</Example>
+
+The same rule explains the figure. Its deeper valley curves with $k \approx 4.5$, so the ball can only settle there if $\eta < 2/4.5 \approx 0.44$. The shallower valley has $k \approx 3.4$ and tolerates up to about $0.58$. Between $1/k$ and $2/k$ the ball overshoots the bottom but the bounces shrink. Beyond $2/k$ they grow, until the ball is thrown into another valley or off the landscape.
+
+Real landscapes curve differently in different directions. The **most sharply curved direction** sets the largest safe learning rate. The **most gently curved direction** then decides how long training takes, because with that $\eta$ it moves only a little per step. A landscape shaped like a long, narrow valley, which is what real networks tend to produce, is therefore hard for plain gradient descent. In practice, large training runs also *schedule* the learning rate: they ramp it up over the first steps (a "warm-up") and decay it towards the end.
+
+## Noisy steps: mini-batches
+
+The true gradient is an average over the entire training set, which for a language model means trillions of tokens. Computing it exactly for every step is out of the question. Instead, each step averages the gradients of a random <Term id="mini-batch">mini-batch</Term> of $B$ examples. This is <Term id="sgd">stochastic gradient descent</Term> (SGD).
+
+The estimate points the right way *on average*, but each one is off by a random error. That error shrinks like $1/\sqrt{B}$: four times the batch halves the noise, at four times the cost per step. So the path is a drunken walk that trends downhill. Far from the bottom, the true slope is large and the noise barely matters. Near the bottom, the true slope shrinks towards zero while the noise does not, so the walk ends up hovering in a small region around the minimum, whose size is set by $\eta$ and $B$.
+
+Language models are trained with batches of millions of tokens per step. The batch is split across many GPUs, each computing the gradient for its share before they average, which is <Preview id="distributed-training">data-parallel training</Preview>.
+
+## Using history: momentum and Adam
+
+Plain gradient descent forgets everything after each step. Two ideas use the slopes it has already seen.
+
+<Figure
+  name="optimizer-paths"
+  interactive
+  title="Four ways down a narrow valley"
+  caption="The loss ½(x² + 20y²) is a valley that is gentle along x and 20 times more sharply curved along y. Each optimiser starts at the same point. Switch between them; the dashed path is plain gradient descent at η = 0.09."
+  notice="Plain gradient descent zigzags across the valley because the gradient points mostly across it, not along it. Momentum cancels the zigzag. With mini-batch noise, the path never quite comes to rest."
+/>
+
+**<Term id="momentum">Momentum</Term>** steps along a running average of recent gradients instead of the latest one:
+
+$$
+\mathbf{v} \leftarrow \beta \mathbf{v} + \nabla L, \qquad \theta \leftarrow \theta - \eta \, \mathbf{v}.
+$$
+
+In a narrow valley, the across-valley part of the gradient flips sign every time the path crosses the valley floor, so in the average it cancels. The along-valley part points the same way every step, so it accumulates: with a typical $\beta = 0.9$, a consistent direction ends up with up to $1/(1 - \beta) = 10$ times the step. In the figure (which uses $\beta = 0.6$, so up to 2.5 times), momentum reaches the bottom in less than half the steps of plain gradient descent, at the same learning rate.
+
+**<Term id="adam">Adam</Term>** adds a second running average, of each parameter's *squared* gradient, and divides that parameter's step by its square root. A parameter whose gradients are consistently large gets its steps scaled down; one whose gradients are tiny gets them scaled up. Each parameter effectively gets its own learning rate, matched to its own slope. In a network where some weights see gradients thousands of times larger than others, one global $\eta$ cannot suit them all, and this is Adam's real advantage. In the figure's simple bowl, well-tuned momentum actually beats it. Almost every large language model is trained with AdamW, a variant of Adam with <Preview id="training-in-practice">weight decay</Preview> handled separately. The cost is memory: Adam keeps two extra numbers for every parameter.
+
+## Reason with it
+
+**Why doesn't training get stuck in bad local minima in a billion dimensions?** A point where the slope is zero is a true minimum only if the landscape curves upwards in *every* direction. At a high-loss point with a billion directions to check, it is overwhelmingly likely that at least some of them still curve downwards. Such a point is a <Term id="saddle-point">saddle point</Term>, not a trap: the slightest nudge along a downward direction, and mini-batch noise provides plenty, sends the walk onwards. Empirically, large networks trained this way reach many different minima of similar, low loss. This is an observation backed by heuristic arguments, not a theorem, but it is why the "stuck in a local minimum" worry from low-dimensional pictures rarely bites.
+
+**Why decay the learning rate at the end of training?** Near the bottom, the true gradient is almost zero, while the mini-batch noise stays the same size. Each step is then mostly noise, multiplied by $\eta$, so the walk hovers in a region whose size scales with the learning rate. Shrinking $\eta$ shrinks that region and lets the parameters settle deeper. This is what the sharp drop in loss at the end of a decaying learning-rate schedule shows.
+
+**Why do large or noisy steps tend to end up in flat valleys?** A valley can only hold a walk with $\eta < 2/k$, so a sharply curved (narrow) valley needs small steps, while a flat, wide one tolerates large ones. With a large learning rate or noisy steps, narrow valleys cannot hold the walk and it keeps moving until it finds a wide one. You can see this in the first figure: start on the left with $\eta \approx 0.5$ and the ball is kicked out of the narrow, deeper valley and settles in the wide one. Wide, flat minima are widely believed to generalise better, because small differences between training data and new data move a flat valley's floor less. That is an influential heuristic, not a law.
+
+## Where this picture breaks
+
+- **Low-dimensional pictures mislead about high dimensions.** Hills, ridges and isolated valleys are what 1-D and 2-D figures show. In billions of dimensions, theory and experiments suggest that most flat points at high loss are saddles, and low-loss regions found by training are often connected by low paths rather than isolated. Use the figures for the local mechanics (slope, step, curvature), not the global shape.
+- **The landscape shifts under your feet.** Each mini-batch defines a slightly different landscape. The "true" training landscape is an average you never compute exactly, and the one that matters, loss on new data, is a different landscape again.
+- **The gradient is purely local.** It relies on the surface looking flat at the scale of one step, as the derivatives lesson warned. Take steps large enough to break that assumption and the update stops being "downhill" at all, which is what a loss spike is.
+- **The gradient was assumed free.** Computing it for every parameter at once is its own problem, solved by <LessonLink id="backpropagation" />.
+
+## Why it matters in the feed
+
+When a lab publishes a training loss curve, you are looking at the height of the walker over time. The fast early drop is steep terrain, the long slow tail is the gentle floor of a valley, and a final dip usually coincides with learning-rate decay. "Loss spikes" and restarts from checkpoints are steps that overshot. Batch sizes quoted in millions of tokens reflect the trade-off between gradient noise and cost per step. New optimisers such as Muon or Shampoo are all answers to the same question: given the gradients seen so far, what step should be taken now? Their claims are usually of the form "the same loss in fewer steps", which you can now read as "a better way down narrow valleys".
+
+## Recap
+
+- Parameters are a location, the loss is the height, and training repeats $\theta \leftarrow \theta - \eta \nabla L$. The gradient comes from the derivatives lesson: the steepest-ascent direction, so we step against it.
+- The landscape is defined by the data. The loss is the average cross-entropy from the probability lesson, and badly predicted examples make the steepest slopes.
+- A valley with curvature $k$ holds the walk only if $\eta < 2/k$. The sharpest direction limits $\eta$, and the gentlest one sets how long training takes.
+- Mini-batches give cheap, noisy gradient estimates whose noise falls like $1/\sqrt{B}$. Momentum averages away zigzags, and Adam gives each parameter its own step size.
+- In very high dimensions, flat points at high loss are thought to be mostly saddles rather than traps, and large or noisy steps tend to favour wide valleys (both are heuristics, not theorems).

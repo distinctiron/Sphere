@@ -1,13 +1,19 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { X, Send, Loader2, Trash2, Copy, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { readBillingDenial, UpgradeNotice, type BillingDenial } from "@/components/billing/upgrade-notice";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { Citation } from "@/lib/rag/types";
+import { SketchCorner, SketchDivider, SketchFrame, SketchWedge } from "@/components/sketch";
+import { CitedText, SourceList, citedIdsIn } from "./citations";
+import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon, PencilSpinner, SendIcon, TrashIcon } from "./sketch-icons";
 
 export interface Message {
   role: "user" | "assistant";
   content: string;
+  /** Passages retrieved for this answer (RAG) */
+  citations?: Citation[];
 }
 
 interface DeepDivePanelProps {
@@ -21,6 +27,8 @@ interface DeepDivePanelProps {
   onWidthChange: (width: number) => void;
   onSelectedText?: (text: string) => void;
   initialSelectedText?: string;
+  /** Scroll the paper to a cited passage */
+  onNavigateToSource?: (citation: Citation) => void;
 }
 
 export function DeepDivePanel({
@@ -34,12 +42,14 @@ export function DeepDivePanel({
   onWidthChange,
   onSelectedText,
   initialSelectedText,
+  onNavigateToSource,
 }: DeepDivePanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState("");
   const [quotedText, setQuotedText] = useState<string | null>(initialSelectedText || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [denial, setDenial] = useState<BillingDenial | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -107,6 +117,7 @@ export function DeepDivePanel({
     setQuotedText(null);
     setLoading(true);
     setError(null);
+    setDenial(null);
 
     // Create conversation history
     const conversationHistory: Message[] = [...messages, userMessage];
@@ -126,6 +137,15 @@ export function DeepDivePanel({
         }),
       });
 
+      const billingDenial = await readBillingDenial(response);
+      if (billingDenial) {
+        // Not an error to retry: show the plans and give the question back
+        setDenial(billingDenial);
+        setMessages((prev) => prev.slice(0, -1));
+        setInputText(textToSend);
+        setLoading(false);
+        return;
+      }
       if (!response.ok) {
         throw new Error("Failed to send message");
       }
@@ -140,6 +160,7 @@ export function DeepDivePanel({
 
       let buffer = "";
       let assistantMessage = "";
+      let assistantCitations: Citation[] = [];
 
       // Add assistant message placeholder
       setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
@@ -170,6 +191,9 @@ export function DeepDivePanel({
                 setMessages((prev) => prev.slice(0, -1));
                 return;
               }
+              if (Array.isArray(parsed.citations)) {
+                assistantCitations = parsed.citations;
+              }
               if (parsed.chunk) {
                 assistantMessage += parsed.chunk;
                 // Update the last message (assistant message)
@@ -178,6 +202,7 @@ export function DeepDivePanel({
                   newMessages[newMessages.length - 1] = {
                     role: "assistant",
                     content: assistantMessage,
+                    citations: assistantCitations,
                   };
                   return newMessages;
                 });
@@ -254,8 +279,8 @@ export function DeepDivePanel({
       <div
         ref={resizerRef}
         className={cn(
-          "absolute top-0 bottom-0 left-0 w-1 bg-transparent hover:bg-indigo-500 cursor-col-resize z-50 transition-colors",
-          isResizing && "bg-indigo-600"
+          "absolute top-0 bottom-0 left-0 w-1.5 bg-transparent hover:bg-pen/30 cursor-col-resize z-50 transition-colors",
+          isResizing && "bg-pen/50"
         )}
         onMouseDown={(e) => {
           e.preventDefault();
@@ -272,230 +297,241 @@ export function DeepDivePanel({
           onClick={onToggle}
           className={cn(
             "absolute top-1/2 -translate-y-1/2 -translate-x-1/2",
-            "w-8 h-16 bg-white border border-slate-200 rounded-l-md",
+            "w-7 h-16 bg-sheet text-ink hover:text-pen",
             "flex items-center justify-center",
-            "text-slate-400 hover:text-indigo-600 hover:border-indigo-500",
-            "shadow-md transition-colors",
-            "focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            "focus-visible:outline-dashed focus-visible:outline-2 focus-visible:outline-pen"
           )}
           aria-label="Close chat pane"
           aria-expanded="true"
         >
-          <ChevronRight className="w-5 h-5" />
+          <SketchFrame seed="deep-dive-edge-open" w={28} h={64} />
+          <ChevronIcon direction="right" className="relative" />
         </button>
       </div>
 
       {/* Chat Panel */}
-      <div
-        ref={panelRef}
-        role="complementary"
-        aria-label="Deep Dive Chat Panel"
-        className={cn(
-          "bg-white border-l border-slate-200",
-          "flex flex-col h-full",
-          "transition-all duration-300 ease-in-out"
-        )}
-        style={{ width: "100%" }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50 flex-shrink-0">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900 truncate">
-              Chat with Paper
-            </h2>
-            <p className="text-xs text-slate-600 truncate mt-0.5" title={paperTitle}>
-              {paperTitle}
-            </p>
-            {authorsText && (
-              <p className="text-xs text-slate-500 truncate" title={authorsText}>
-                {authorsText}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2 ml-4 flex-shrink-0">
-            {messages.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleClearConversation}
-                aria-label="Clear conversation"
-                title="Clear conversation"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={onClose}
-              aria-label="Close panel"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-
-        {/* Message Area - flex-1 to take available space, shrinks when input area expands */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-          {messages.length === 0 && (
-            <div className="flex items-center justify-center h-full text-center">
-              <div className="max-w-md">
-                <p className="text-slate-600 mb-2">
-                  Ask questions about this paper to explore it deeply.
-                </p>
-                <p className="text-sm text-slate-500">
-                  Try asking about concepts, methodology, results, or references.
-                </p>
-              </div>
-            </div>
+      <div className="h-full py-3 pl-4 pr-4 pb-4">
+        <div
+          ref={panelRef}
+          role="complementary"
+          aria-label="Deep Dive Chat Panel"
+          className={cn(
+            "sk-card",
+            "flex flex-col h-full",
+            "transition-all duration-300 ease-in-out"
           )}
+          style={{ width: "100%" }}
+        >
+          <SketchFrame seed={`deep-dive-${paperId}`} w={600} h={1100} />
+          <SketchCorner seed={`deep-dive-${paperId}:c`} size="panel" />
+          <SketchWedge seed={`deep-dive-${paperId}:w`} />
 
-          {messages.map((message, index) => {
-            const messageId = `message-${index}`;
-            const isUser = message.role === "user";
-
-            return (
-              <div
-                key={messageId}
-                className={cn(
-                  "flex flex-col gap-2",
-                  isUser ? "items-end" : "items-start"
-                )}
-              >
-                <div
-                  className={cn(
-                    "max-w-[85%] rounded-lg p-3",
-                    isUser
-                      ? "bg-slate-100 text-slate-900 border-l-4 border-indigo-600"
-                      : "bg-white border border-slate-200 text-slate-800 prose prose-sm max-w-none"
-                  )}
+          {/* Header */}
+          <div className="relative flex items-start justify-between gap-2 px-5 pt-5 flex-shrink-0">
+            <div className="flex-1 min-w-0">
+              <h2 className="font-hand text-[36px] font-bold leading-none truncate">
+                Chat with Paper
+              </h2>
+              <p className="mt-1.5 font-semibold truncate" title={paperTitle}>
+                {paperTitle}
+              </p>
+              {authorsText && (
+                <p className="text-[13px] text-pencil truncate" title={authorsText}>
+                  {authorsText}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center flex-shrink-0 -mr-2 -mt-2">
+              {messages.length > 0 && (
+                <button
+                  type="button"
+                  className="sk-icon"
+                  onClick={handleClearConversation}
+                  aria-label="Clear conversation"
+                  title="Clear conversation"
                 >
-                  {isUser ? (
-                    <p className="text-sm whitespace-pre-wrap break-words">
-                      {message.content}
-                    </p>
-                  ) : (
-                    <div className="relative group">
-                      <div className="text-sm whitespace-pre-wrap break-words">
-                        {message.content}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className={cn(
-                          "absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity",
-                          copiedMessageId === messageId && "opacity-100"
-                        )}
-                        onClick={() => handleCopyMessage(message.content, messageId)}
-                        aria-label="Copy message"
-                      >
-                        {copiedMessageId === messageId ? (
-                          <Check className="h-3 w-3 text-green-600" />
-                        ) : (
-                          <Copy className="h-3 w-3" />
-                        )}
-                      </Button>
-                    </div>
-                  )}
+                  <TrashIcon />
+                </button>
+              )}
+              <button type="button" className="sk-icon" onClick={onClose} aria-label="Close panel">
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <SketchDivider seed={`deep-dive-${paperId}:rule`} w={560} className="relative mx-5 mt-3 w-auto flex-shrink-0" />
+
+          {/* Message Area - flex-1 to take available space, shrinks when input area expands */}
+          <div className="relative flex-1 overflow-y-auto px-5 py-4 space-y-5 min-h-0">
+            {messages.length === 0 && (
+              <div className="flex items-center justify-center h-full text-center">
+                <div className="max-w-md">
+                  <p className="font-hand text-[26px] font-bold leading-tight mb-1">
+                    Ask questions about this paper to explore it deeply.
+                  </p>
+                  <p className="text-sm text-pencil">
+                    Try asking about concepts, methodology, results, or references.
+                  </p>
                 </div>
               </div>
-            );
-          })}
+            )}
 
-          {loading && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <p className="text-sm">AI is thinking...</p>
+            {messages.map((message, index) => {
+              const messageId = `message-${index}`;
+              const isUser = message.role === "user";
+
+              return (
+                <div
+                  key={messageId}
+                  className={cn(
+                    "flex flex-col gap-2",
+                    isUser ? "items-end" : "items-start"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "relative p-4",
+                      isUser
+                        ? "max-w-[88%] bg-[#f3f1ea]"
+                        : "max-w-[96%] bg-sheet prose prose-sm"
+                    )}
+                  >
+                    <SketchFrame seed={`${paperId}:${messageId}`} w={isUser ? 470 : 540} h={isUser ? 120 : 360} />
+                    {!isUser && <SketchWedge seed={`${paperId}:${messageId}:w`} delay={0.2} />}
+                    {isUser ? (
+                      <p className="relative text-[15px] whitespace-pre-wrap break-words">
+                        {message.content}
+                      </p>
+                    ) : (
+                      <div className="relative group">
+                        <CitedText
+                          text={message.content}
+                          citations={message.citations ?? []}
+                          onCitationClick={onNavigateToSource}
+                          className="font-sans text-[15px] leading-relaxed"
+                        />
+                        {message.citations && message.citations.length > 0 && (
+                          <SourceList
+                            citations={message.citations}
+                            citedIds={citedIdsIn(message.content)}
+                            onNavigate={onNavigateToSource}
+                          />
+                        )}
+                        <button
+                          type="button"
+                          className={cn(
+                            "sk-icon !absolute -top-3 -right-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity",
+                            copiedMessageId === messageId && "opacity-100"
+                          )}
+                          onClick={() => handleCopyMessage(message.content, messageId)}
+                          aria-label="Copy message"
+                        >
+                          {copiedMessageId === messageId ? (
+                            <CheckIcon size={16} className="text-[#1f8a57]" />
+                          ) : (
+                            <CopyIcon />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {loading && (
+              <div className="flex items-center gap-2 text-pencil" role="status">
+                <PencilSpinner />
+                <p className="font-hand text-[22px] font-bold">AI is thinking...</p>
+              </div>
+            )}
+
+            {denial && <UpgradeNotice denial={denial} />}
+
+            {error && (
+              <div className="relative bg-sheet p-4">
+                <SketchFrame seed={`${paperId}:error`} w={540} h={110} tone="red" />
+                <p className="relative text-sm text-pen mb-3">{error}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSend}
+                  className="w-full"
+                >
+                  Retry
+                </Button>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input Area - flex-shrink-0 at bottom, quoted text expands this area, pushing message area up */}
+          <div className="relative px-5 pb-5 pt-2 flex-shrink-0 flex flex-col">
+            {/* Quoted text blockquote - positioned at top of input area, expands input area */}
+            {quotedText && (
+              <div className="relative mb-3 bg-[#f3f1ea] py-2.5 pl-3.5 pr-10 flex-shrink-0">
+                <SketchFrame seed={`${paperId}:quote`} w={500} h={70} dashed />
+                <blockquote className="relative max-h-32 overflow-y-auto font-serif italic text-sm whitespace-pre-wrap break-words">
+                  “{quotedText}”
+                </blockquote>
+                <button
+                  type="button"
+                  className="sk-icon !absolute right-0 top-0"
+                  onClick={handleRemoveQuotedText}
+                  aria-label="Remove quoted text"
+                >
+                  <CloseIcon size={16} />
+                </button>
+              </div>
+            )}
+
+            {/* Textarea container */}
+            <div className="relative">
+              <span className="sk-field">
+                <SketchFrame seed={`${paperId}:input`} w={556} h={130} />
+                <label htmlFor={`deep-dive-input-${paperId}`} className="sr-only">
+                  Ask a question about this paper
+                </label>
+                <textarea
+                  id={`deep-dive-input-${paperId}`}
+                  ref={inputRef}
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Ctrl+Enter to send
+                    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  placeholder="Ask a question about this paper..."
+                  className="sk-inp block resize-none !pb-14"
+                  rows={4}
+                  disabled={loading}
+                />
+
+                {/* Send Button - Floating bottom-right */}
+                <Button
+                  onClick={handleSend}
+                  disabled={!inputText.trim() || loading}
+                  className="!absolute bottom-2.5 right-2.5"
+                  size="sm"
+                  aria-label={loading ? "Sending" : undefined}
+                >
+                  {loading ? (
+                    <PencilSpinner />
+                  ) : (
+                    <>
+                      Send
+                      <SendIcon />
+                    </>
+                  )}
+                </Button>
+              </span>
+
+              {/* Hints */}
+              <p className="sk-help mt-2 mb-0">Markdown supported • Ctrl+Enter to send</p>
             </div>
-          )}
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-              <p className="text-sm text-red-600 mb-2">{error}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSend}
-                className="w-full"
-              >
-                Retry
-              </Button>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input Area - flex-shrink-0 at bottom, quoted text expands this area, pushing message area up */}
-        <div className="border-t border-slate-200 p-4 flex-shrink-0 flex flex-col">
-          {/* Quoted text blockquote - positioned at top of input area, expands input area */}
-          {quotedText && (
-            <div className="mb-3 p-3 bg-slate-50 border-l-4 border-indigo-600 rounded-r rounded-b relative flex-shrink-0">
-              <blockquote className="text-sm text-slate-700 whitespace-pre-wrap break-words pr-8">
-                {quotedText}
-              </blockquote>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute top-1 right-1 h-6 w-6"
-                onClick={handleRemoveQuotedText}
-                aria-label="Remove quoted text"
-              >
-                <X className="h-3 w-3" />
-              </Button>
-            </div>
-          )}
-
-          {/* Textarea container */}
-          <div className="relative">
-            <textarea
-              ref={inputRef}
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              onKeyDown={(e) => {
-                // Ctrl+Enter to send
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              placeholder="Ask a question about this paper..."
-              className={cn(
-                "w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-2",
-                "text-sm placeholder:text-slate-400",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500",
-                "disabled:cursor-not-allowed disabled:opacity-50"
-              )}
-              rows={4}
-              disabled={loading}
-            />
-            
-            {/* Hints */}
-            <div className="flex items-center justify-between mt-1 text-xs text-slate-500">
-              <span>Markdown supported • Ctrl+Enter to send</span>
-            </div>
-
-            {/* Send Button - Floating bottom-right */}
-            <Button
-              onClick={handleSend}
-              disabled={!inputText.trim() || loading}
-              className={cn(
-                "absolute bottom-3 right-3",
-                "h-8 px-4"
-              )}
-              size="sm"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <Send className="h-4 w-4 mr-2" />
-                  Send
-                </>
-              )}
-            </Button>
           </div>
         </div>
       </div>
@@ -509,17 +545,16 @@ export function DeepDiveToggle({ onToggle }: { onToggle: () => void }) {
     <button
       onClick={onToggle}
       className={cn(
-        "fixed right-0 top-1/2 -translate-y-1/2 z-40",
-        "w-8 h-16 bg-white border border-slate-200 border-r-0 rounded-l-md",
+        "fixed right-2 top-1/2 -translate-y-1/2 z-40",
+        "w-[30px] h-24 bg-sheet text-ink hover:text-pen",
         "flex items-center justify-center",
-        "text-slate-400 hover:text-indigo-600 hover:border-indigo-500",
-        "shadow-md transition-colors",
-        "focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        "focus-visible:outline-dashed focus-visible:outline-2 focus-visible:outline-pen"
       )}
       aria-label="Open chat pane"
       aria-expanded="false"
     >
-      <ChevronLeft className="w-5 h-5" />
+      <SketchFrame seed="deep-dive-edge-closed" w={30} h={96} />
+      <ChevronIcon direction="left" className="relative" />
     </button>
   );
 }

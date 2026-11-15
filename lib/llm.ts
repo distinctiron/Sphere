@@ -8,7 +8,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import Anthropic from "@anthropic-ai/sdk";
-import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 // Zod schema for novelty score response
@@ -20,6 +20,25 @@ const NoveltyScoreSchema = z.object({
 export interface NoveltyScoreResponse {
   score: number; // 0-10
   summary: string; // Explanation of why it's novel
+}
+
+/** Default model when LLM_PROVIDER=anthropic and LLM_MODEL is unset */
+export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5";
+
+/**
+ * Request options shared by every Anthropic call.
+ *
+ * Claude Sonnet 5.5 thinks adaptively and rejects `temperature`, so tone and
+ * length are steered by the prompts. Effort `low` suits chat, explanations and
+ * extraction (it skips thinking on most simple requests); thinking tokens count
+ * towards `max_tokens`, so the limits leave headroom above the expected reply.
+ */
+function anthropicOptions(maxTokens: number) {
+  return {
+    max_tokens: maxTokens,
+    thinking: { type: "adaptive" as const },
+    output_config: { effort: "low" as const },
+  };
 }
 
 interface LLMConfig {
@@ -36,8 +55,6 @@ function getLLMConfig(): LLMConfig {
   const provider = (process.env.LLM_PROVIDER as "openai" | "anthropic" | "mock") || "mock";
   const apiKey = process.env.LLM_API_KEY;
 
-  console.log("LLM_PROVIDER", provider);
-  
   // Warn if provider is not mock but no API key is provided
   if (provider !== "mock" && !apiKey) {
     console.warn(
@@ -53,7 +70,126 @@ function getLLMConfig(): LLMConfig {
   return {
     provider,
     apiKey,
-    model: process.env.LLM_MODEL || (provider === "openai" ? "gpt-4o-2024-08-06" : provider === "anthropic" ? "claude-sonnet-4-5" : undefined),
+    model: process.env.LLM_MODEL || (provider === "openai" ? "gpt-4o-2024-08-06" : provider === "anthropic" ? DEFAULT_ANTHROPIC_MODEL : undefined),
+  };
+}
+
+/**
+ * Whether a real LLM provider is configured (false in mock mode).
+ * Background jobs use this to avoid persisting placeholder mock scores.
+ */
+export function isLLMConfigured(): boolean {
+  const provider = process.env.LLM_PROVIDER;
+  return (provider === "openai" || provider === "anthropic") && !!process.env.LLM_API_KEY;
+}
+
+// ---------------------------------------------------------------------------
+// Usage reporting (for billing, lib/billing)
+// ---------------------------------------------------------------------------
+
+/** Token usage of one model call. inputTokens excludes cached and cache-write tokens. */
+export interface LLMUsage {
+  provider: "openai" | "anthropic" | "mock";
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+}
+
+/** Called once per model call with its usage */
+export type UsageCallback = (usage: LLMUsage) => void;
+
+type OpenAIChatUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  prompt_tokens_details?: { cached_tokens?: number } | null;
+} | null | undefined;
+
+function openAIChatUsage(model: string, usage: OpenAIChatUsage): LLMUsage | undefined {
+  if (!usage) return undefined;
+  const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+  return {
+    provider: "openai",
+    model,
+    inputTokens: usage.prompt_tokens - cached,
+    outputTokens: usage.completion_tokens,
+    cachedInputTokens: cached,
+    cacheWriteTokens: 0,
+  };
+}
+
+type OpenAIResponsesUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  input_tokens_details?: { cached_tokens?: number } | null;
+} | null | undefined;
+
+function openAIResponsesUsage(model: string, usage: OpenAIResponsesUsage): LLMUsage | undefined {
+  if (!usage) return undefined;
+  const cached = usage.input_tokens_details?.cached_tokens ?? 0;
+  return {
+    provider: "openai",
+    model,
+    inputTokens: usage.input_tokens - cached,
+    outputTokens: usage.output_tokens,
+    cachedInputTokens: cached,
+    cacheWriteTokens: 0,
+  };
+}
+
+type AnthropicUsage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number | null;
+  cache_creation_input_tokens?: number | null;
+};
+
+function anthropicUsage(model: string, usage: AnthropicUsage): LLMUsage {
+  return {
+    provider: "anthropic",
+    model,
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cachedInputTokens: usage.cache_read_input_tokens ?? 0,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+  };
+}
+
+/**
+ * Report usage for a finished Anthropic stream. A safeguard decline arrives as a
+ * normal response with stop_reason "refusal"; it is billed like any call, then
+ * raised so the route's error message is shown instead of an empty answer.
+ */
+async function finishAnthropicStream(
+  stream: { finalMessage(): Promise<Anthropic.Message> },
+  model: string,
+  onUsage?: UsageCallback
+): Promise<void> {
+  const final = await stream.finalMessage();
+  onUsage?.(anthropicUsage(model, final.usage));
+  if (final.stop_reason === "refusal") throw new Error("The model declined this request");
+}
+
+/** Mock mode estimates tokens at ~4 characters each, so billing can be exercised without an API key */
+function mockUsage(prompt: string, output: string): LLMUsage {
+  return {
+    provider: "mock",
+    model: "mock",
+    inputTokens: Math.ceil(prompt.length / 4),
+    outputTokens: Math.ceil(output.length / 4),
+    cachedInputTokens: 0,
+    cacheWriteTokens: 0,
+  };
+}
+
+/** GPT-5 and o-series reasoning models reject `max_tokens` and non-default temperatures */
+function openAIChatOptions(model: string, maxTokens: number, temperature: number) {
+  const reasoningModel = /^(gpt-5|o\d)/.test(model);
+  return {
+    max_completion_tokens: maxTokens,
+    ...(reasoningModel ? {} : { temperature }),
+    stream_options: { include_usage: true },
   };
 }
 
@@ -70,23 +206,26 @@ export async function scoreNovelty(
   title: string,
   abstract: string,
   authors: Array<{ name: string }>,
-  categories: string[]
+  categories: string[],
+  onUsage?: UsageCallback
 ): Promise<NoveltyScoreResponse> {
   const config = getLLMConfig();
 
   // Mock implementation for development/testing (when no API key provided)
   if (config.provider === "mock" || !config.apiKey) {
     console.warn("Using mock novelty scoring. Set LLM_PROVIDER and LLM_API_KEY to use real LLM scoring.");
-    return mockNoveltyScoring(title, abstract, authors, categories);
+    const result = mockNoveltyScoring(title, abstract, authors, categories);
+    onUsage?.(mockUsage(createNoveltyScoringPrompt(title, abstract, authors, categories), result.summary));
+    return result;
   }
 
   // Real LLM implementation
   if (config.provider === "openai") {
-    return scoreNoveltyWithOpenAI(title, abstract, authors, categories, config);
+    return scoreNoveltyWithOpenAI(title, abstract, authors, categories, config, onUsage);
   }
 
   if (config.provider === "anthropic") {
-    return scoreNoveltyWithAnthropic(title, abstract, authors, categories, config);
+    return scoreNoveltyWithAnthropic(title, abstract, authors, categories, config, onUsage);
   }
 
   // Fallback to mock
@@ -146,7 +285,8 @@ async function scoreNoveltyWithOpenAI(
   abstract: string,
   authors: Array<{ name: string }>,
   categories: string[],
-  config: LLMConfig
+  config: LLMConfig,
+  onUsage?: UsageCallback
 ): Promise<NoveltyScoreResponse> {
   const prompt = createNoveltyScoringPrompt(title, abstract, authors, categories);
 
@@ -173,6 +313,8 @@ async function scoreNoveltyWithOpenAI(
       },
     });
 
+    const usage = openAIResponsesUsage(config.model!, response.usage);
+    if (usage) onUsage?.(usage);
     const parsed = response.output_parsed;
 
     if (!parsed) {
@@ -203,7 +345,8 @@ async function scoreNoveltyWithAnthropic(
   abstract: string,
   authors: Array<{ name: string }>,
   categories: string[],
-  config: LLMConfig
+  config: LLMConfig,
+  onUsage?: UsageCallback
 ): Promise<NoveltyScoreResponse> {
   const prompt = createNoveltyScoringPrompt(title, abstract, authors, categories);
 
@@ -212,10 +355,11 @@ async function scoreNoveltyWithAnthropic(
       apiKey: config.apiKey,
     });
 
-    const response = await client.beta.messages.parse({
+    const options = anthropicOptions(2048);
+    const response = await client.messages.parse({
       model: config.model!,
-      max_tokens: 1024,
-      betas: ["structured-outputs-2025-11-13"],
+      max_tokens: options.max_tokens,
+      thinking: options.thinking,
       messages: [
         {
           role: "user",
@@ -223,9 +367,10 @@ async function scoreNoveltyWithAnthropic(
         },
       ],
       system: "You are a research assistant specializing in evaluating academic papers.",
-      output_format: betaZodOutputFormat(NoveltyScoreSchema),
+      output_config: { ...options.output_config, format: zodOutputFormat(NoveltyScoreSchema) },
     });
 
+    onUsage?.(anthropicUsage(config.model!, response.usage));
     const parsed = response.parsed_output;
 
     if (!parsed) {
@@ -289,32 +434,43 @@ export async function explainText(
  * Generate explanation for selected text with streaming support (for Intellisense feature)
  * Streams the explanation as it's generated
  */
+export interface ExplanationContext {
+  title: string;
+  abstract: string;
+  /** Numbered passages retrieved from the paper (RAG); cited as [n] */
+  sources?: string;
+  /** The paragraph the selection was made in */
+  surroundingText?: string;
+}
+
 export async function explainTextStreaming(
   text: string,
-  paperContext: { title: string; abstract: string },
-  onChunk: (chunk: string) => void
+  paperContext: ExplanationContext,
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const config = getLLMConfig();
   
   // Mock implementation for development/testing
   if (config.provider === "mock" || !config.apiKey) {
-    const mockExplanation = `This term refers to "${text}" in the context of ${paperContext.title}. It's a key concept in the paper's methodology.`;
+    const mockExplanation = `This term refers to "${text}" in the context of ${paperContext.title}. It's a key concept in the paper's methodology.${paperContext.sources ? " The paper discusses it in the retrieved passage [1]." : ""}`;
     // Simulate streaming by sending chunks
     const words = mockExplanation.split(" ");
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 50));
       onChunk(words[i] + (i < words.length - 1 ? " " : ""));
     }
+    onUsage?.(mockUsage(createExplanationPrompt(text, paperContext), mockExplanation));
     return;
   }
 
   // Real LLM implementation
   if (config.provider === "openai") {
-    return explainTextStreamingOpenAI(text, paperContext, config, onChunk);
+    return explainTextStreamingOpenAI(text, paperContext, config, onChunk, onUsage);
   }
 
   if (config.provider === "anthropic") {
-    return explainTextStreamingAnthropic(text, paperContext, config, onChunk);
+    return explainTextStreamingAnthropic(text, paperContext, config, onChunk, onUsage);
   }
 
   // Fallback to mock
@@ -329,15 +485,22 @@ export async function explainTextStreaming(
 /**
  * Create the prompt for text explanation
  */
-function createExplanationPrompt(
-  text: string,
-  paperContext: { title: string; abstract: string }
-): string {
+function createExplanationPrompt(text: string, paperContext: ExplanationContext): string {
+  const surrounding = paperContext.surroundingText
+    ? `\n\n**Paragraph containing the selection:**\n${paperContext.surroundingText.substring(0, 1500)}`
+    : "";
+  const sources = paperContext.sources
+    ? `\n\n**Relevant passages from the paper (numbered sources):**\n${paperContext.sources}`
+    : "";
+  const citationInstruction = paperContext.sources
+    ? "\n- Ground the explanation in the numbered passages and cite them inline like [1] or [2]; only cite a passage you actually used"
+    : "";
+
   return `You are a helpful research assistant. Explain the following term or phrase from an academic paper in clear, accessible language.
 
 **Paper Context:**
 Title: ${paperContext.title}
-Abstract: ${paperContext.abstract.substring(0, 500)}${paperContext.abstract.length > 500 ? "..." : ""}
+Abstract: ${paperContext.abstract.substring(0, 500)}${paperContext.abstract.length > 500 ? "..." : ""}${surrounding}${sources}
 
 **Term/Phrase to Explain:**
 ${text}
@@ -346,7 +509,7 @@ ${text}
 - Provide a simple, clear explanation (2-4 sentences)
 - Use plain language, avoid jargon when possible
 - If helpful, provide an analogy or real-world comparison
-- Reference how it's used in this specific paper's context
+- Reference how it's used in this specific paper's context${citationInstruction}
 - Write in a conversational, educational tone`;
 }
 
@@ -355,9 +518,10 @@ ${text}
  */
 async function explainTextStreamingOpenAI(
   text: string,
-  paperContext: { title: string; abstract: string },
+  paperContext: ExplanationContext,
   config: LLMConfig,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const prompt = createExplanationPrompt(text, paperContext);
 
@@ -366,8 +530,9 @@ async function explainTextStreamingOpenAI(
       apiKey: config.apiKey,
     });
 
+    const model = config.model || "gpt-4o-2024-08-06";
     const stream = await openai.chat.completions.create({
-      model: config.model || "gpt-4o-2024-08-06",
+      model,
       messages: [
         {
           role: "system",
@@ -379,8 +544,7 @@ async function explainTextStreamingOpenAI(
         },
       ],
       stream: true,
-      temperature: 0.7,
-      max_tokens: 300,
+      ...openAIChatOptions(model, 400, 0.7),
     });
 
     for await (const chunk of stream) {
@@ -388,6 +552,8 @@ async function explainTextStreamingOpenAI(
       if (content) {
         onChunk(content);
       }
+      const usage = openAIChatUsage(model, chunk.usage);
+      if (usage) onUsage?.(usage);
     }
   } catch (error) {
     console.error("Error calling OpenAI API for explanation:", error);
@@ -400,9 +566,10 @@ async function explainTextStreamingOpenAI(
  */
 async function explainTextStreamingAnthropic(
   text: string,
-  paperContext: { title: string; abstract: string },
+  paperContext: ExplanationContext,
   config: LLMConfig,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const prompt = createExplanationPrompt(text, paperContext);
 
@@ -411,10 +578,10 @@ async function explainTextStreamingAnthropic(
       apiKey: config.apiKey,
     });
 
+    const model = config.model || DEFAULT_ANTHROPIC_MODEL;
     const stream = await client.messages.stream({
-      model: config.model || "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      temperature: 0.7,
+      model,
+      ...anthropicOptions(1500),
       messages: [
         {
           role: "user",
@@ -429,6 +596,7 @@ async function explainTextStreamingAnthropic(
         onChunk(chunk.delta.text);
       }
     }
+    await finishAnthropicStream(stream, model, onUsage);
   } catch (error) {
     console.error("Error calling Anthropic API for explanation:", error);
     throw error;
@@ -439,14 +607,31 @@ async function explainTextStreamingAnthropic(
  * Create the prompt for chat with paper
  * Includes full paper context, conversation history, and educational teaching style
  */
+export interface ChatPaperContext {
+  title: string;
+  abstract: string;
+  /** Full paper text; only used when no retrieved sources are available */
+  fullContent?: string;
+  /** Numbered passages retrieved for this question (RAG); cited as [n] */
+  sources?: string;
+}
+
 function createChatPrompt(
   message: string,
-  paperContext: { title: string; abstract: string; fullContent?: string },
+  paperContext: ChatPaperContext,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>
 ): string {
-  const paperContent = paperContext.fullContent 
-    ? `\n\n**Full Paper Content:**\n${paperContext.fullContent.substring(0, 100000)}${paperContext.fullContent.length > 100000 ? "\n[... content truncated for length ...]" : ""}`
-    : `\n\n**Abstract:**\n${paperContext.abstract}`;
+  const paperContent = paperContext.sources
+    ? `\n\n**Abstract:**\n${paperContext.abstract}\n\n**Passages retrieved from the paper for this question (numbered sources):**\n${paperContext.sources}`
+    : paperContext.fullContent
+      ? `\n\n**Full Paper Content:**\n${paperContext.fullContent.substring(0, 100000)}${paperContext.fullContent.length > 100000 ? "\n[... content truncated for length ...]" : ""}`
+      : `\n\n**Abstract:**\n${paperContext.abstract}`;
+  const citationInstructions = paperContext.sources
+    ? `- Base your answer on the numbered passages and cite them inline like [1] or [2][3] right after the claims they support
+- Only cite a passage you actually used; never invent source numbers
+- If the passages don't contain the answer, say so, then answer from general knowledge and make clear which parts are not from the paper`
+    : `- Provide detailed, cited responses referencing specific sections (e.g., "Section 3.2", "Figure 1", "Equation 5")
+- Include visual citations (section numbers, page references) in your responses`;
 
   return `You are a sophisticated research assistant and educational tutor helping a researcher understand an academic paper deeply.
 
@@ -464,8 +649,7 @@ ${paperContent}
 - Guide the user's understanding through thoughtful, structured responses
 
 **Instructions:**
-- Provide detailed, cited responses referencing specific sections (e.g., "Section 3.2", "Figure 1", "Equation 5")
-- Include visual citations (section numbers, page references) in your responses
+${citationInstructions}
 - When discussing methodology, results, or implications, provide comprehensive explanations
 - If asked about references or related concepts, discuss them in an educational manner
 - Use markdown formatting (code blocks, lists, emphasis) for clarity
@@ -482,31 +666,34 @@ ${message}`;
  */
 export async function chatWithPaperStreaming(
   message: string,
-  paperContext: { title: string; abstract: string; fullContent?: string },
+  paperContext: ChatPaperContext,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const config = getLLMConfig();
   
   // Mock implementation for development/testing
   if (config.provider === "mock" || !config.apiKey) {
-    const mockResponse = `I understand you're asking about "${message}" in the context of ${paperContext.title}. This is an interesting question that relates to the paper's main contributions. Let me explore this further based on the paper's content.`;
+    const mockResponse = `I understand you're asking about "${message}" in the context of ${paperContext.title}. This is an interesting question that relates to the paper's main contributions${paperContext.sources ? " [1]" : ""}. Let me explore this further based on the paper's content.`;
     // Simulate streaming by sending chunks
     const words = mockResponse.split(" ");
     for (let i = 0; i < words.length; i++) {
       await new Promise(resolve => setTimeout(resolve, 50));
       onChunk(words[i] + (i < words.length - 1 ? " " : ""));
     }
+    const historyText = conversationHistory.map((m) => m.content).join("\n");
+    onUsage?.(mockUsage(historyText + createChatPrompt(message, paperContext, conversationHistory), mockResponse));
     return;
   }
 
   // Real LLM implementation
   if (config.provider === "openai") {
-    return chatWithPaperStreamingOpenAI(message, paperContext, conversationHistory, config, onChunk);
+    return chatWithPaperStreamingOpenAI(message, paperContext, conversationHistory, config, onChunk, onUsage);
   }
 
   if (config.provider === "anthropic") {
-    return chatWithPaperStreamingAnthropic(message, paperContext, conversationHistory, config, onChunk);
+    return chatWithPaperStreamingAnthropic(message, paperContext, conversationHistory, config, onChunk, onUsage);
   }
 
   // Fallback to mock
@@ -523,10 +710,11 @@ export async function chatWithPaperStreaming(
  */
 async function chatWithPaperStreamingOpenAI(
   message: string,
-  paperContext: { title: string; abstract: string; fullContent?: string },
+  paperContext: ChatPaperContext,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
   config: LLMConfig,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const prompt = createChatPrompt(message, paperContext, conversationHistory);
 
@@ -551,12 +739,12 @@ async function chatWithPaperStreamingOpenAI(
       },
     ];
 
+    const model = config.model || "gpt-4o-2024-08-06";
     const stream = await openai.chat.completions.create({
-      model: config.model || "gpt-4o-2024-08-06",
+      model,
       messages,
       stream: true,
-      temperature: 0.7,
-      max_tokens: 2000,
+      ...openAIChatOptions(model, 2000, 0.7),
     });
 
     for await (const chunk of stream) {
@@ -564,6 +752,8 @@ async function chatWithPaperStreamingOpenAI(
       if (content) {
         onChunk(content);
       }
+      const usage = openAIChatUsage(model, chunk.usage);
+      if (usage) onUsage?.(usage);
     }
   } catch (error) {
     console.error("Error calling OpenAI API for chat:", error);
@@ -576,10 +766,11 @@ async function chatWithPaperStreamingOpenAI(
  */
 async function chatWithPaperStreamingAnthropic(
   message: string,
-  paperContext: { title: string; abstract: string; fullContent?: string },
+  paperContext: ChatPaperContext,
   conversationHistory: Array<{ role: "user" | "assistant"; content: string }>,
   config: LLMConfig,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
 ): Promise<void> {
   const prompt = createChatPrompt(message, paperContext, conversationHistory);
 
@@ -600,10 +791,10 @@ async function chatWithPaperStreamingAnthropic(
       },
     ];
 
+    const model = config.model || DEFAULT_ANTHROPIC_MODEL;
     const stream = await client.messages.stream({
-      model: config.model || "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      temperature: 0.7,
+      model,
+      ...anthropicOptions(4000),
       messages,
       system: "You are a sophisticated research assistant and educational tutor helping researchers understand academic papers deeply. Act as a teacher, providing educational explanations, breaking down complex concepts, and adapting to the user's understanding level.",
     });
@@ -613,6 +804,7 @@ async function chatWithPaperStreamingAnthropic(
         onChunk(chunk.delta.text);
       }
     }
+    await finishAnthropicStream(stream, model, onUsage);
   } catch (error) {
     console.error("Error calling Anthropic API for chat:", error);
     throw error;
@@ -639,3 +831,260 @@ export async function chatWithPaper(
   return `Chat response for: ${message}`;
 }
 
+
+// ---------------------------------------------------------------------------
+// Breaking news (Epic 8)
+// ---------------------------------------------------------------------------
+
+/** Model used for generated content (recorded with cached story articles) */
+export function getLLMModelName(): string {
+  const config = getLLMConfig();
+  return config.provider === "mock" ? "mock" : `${config.provider}:${config.model}`;
+}
+
+const StorySummarySchema = z.object({
+  headline: z.string(),
+  summary: z.string(),
+  whyItMatters: z.string(),
+});
+
+export type StorySummary = z.infer<typeof StorySummarySchema>;
+
+export interface StorySummaryItem {
+  platform: string;
+  sourceName: string;
+  title: string;
+  snippet?: string | null;
+  engagement: number;
+  comments: number;
+  publishedAt: Date;
+}
+
+const NEWS_SYSTEM_PROMPT =
+  "You are a sharp, neutral technology news editor covering artificial intelligence. You write accurately, attribute claims to their sources, separate facts from speculation, and never invent details that the sources don't support.";
+
+function createStorySummaryPrompt(items: StorySummaryItem[]): string {
+  const list = items
+    .map(
+      (item, i) =>
+        `${i + 1}. [${item.platform} · ${item.sourceName} · ${item.publishedAt.toISOString().slice(0, 16).replace("T", " ")} UTC` +
+        `${item.engagement > 0 ? ` · ${item.engagement} points/upvotes/stars` : ""}${item.comments > 0 ? ` · ${item.comments} comments` : ""}]\n` +
+        `   ${item.title}${item.snippet ? `\n   ${item.snippet.slice(0, 300)}` : ""}`
+    )
+    .join("\n");
+
+  return `These posts and articles from different platforms were grouped together as one AI news story:
+
+${list}
+
+Write:
+- headline: a clear, factual news headline for the story (max 90 characters, no clickbait, no trailing period)
+- summary: 2-3 sentences on what happened, based only on the items above
+- whyItMatters: one sentence on why this matters for people following AI
+
+If the items turn out not to be about a single event, describe the common thread.`;
+}
+
+/** Headline + summary for a clustered story (structured output) */
+export async function summarizeStory(items: StorySummaryItem[], onUsage?: UsageCallback): Promise<StorySummary> {
+  const config = getLLMConfig();
+  if (config.provider === "mock" || !config.apiKey) {
+    return {
+      headline: items[0]?.title ?? "Untitled story",
+      summary: "Mock summary: configure LLM_PROVIDER and LLM_API_KEY to generate story summaries.",
+      whyItMatters: "",
+    };
+  }
+
+  const prompt = createStorySummaryPrompt(items);
+  let parsed: StorySummary | null | undefined;
+  if (config.provider === "openai") {
+    const response = await new OpenAI({ apiKey: config.apiKey }).responses.parse({
+      model: config.model!,
+      input: [
+        { role: "system", content: NEWS_SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      text: { format: zodTextFormat(StorySummarySchema, "story_summary") },
+    });
+    const usage = openAIResponsesUsage(config.model!, response.usage);
+    if (usage) onUsage?.(usage);
+    parsed = response.output_parsed;
+  } else {
+    const options = anthropicOptions(2048);
+    const response = await new Anthropic({ apiKey: config.apiKey }).messages.parse({
+      model: config.model!,
+      max_tokens: options.max_tokens,
+      thinking: options.thinking,
+      system: NEWS_SYSTEM_PROMPT,
+      messages: [{ role: "user", content: prompt }],
+      output_config: { ...options.output_config, format: zodOutputFormat(StorySummarySchema) },
+    });
+    onUsage?.(anthropicUsage(config.model!, response.usage));
+    parsed = response.parsed_output;
+  }
+  if (!parsed) throw new Error("No parsed output for story summary");
+
+  const validated = StorySummarySchema.parse(parsed);
+  return {
+    headline: validated.headline.trim().replace(/\.$/, "").slice(0, 160),
+    summary: validated.summary.trim(),
+    whyItMatters: validated.whyItMatters.trim(),
+  };
+}
+
+export interface StoryArticleContext {
+  headline: string;
+  summary?: string | null;
+  /** Numbered source blocks; cited as [n] */
+  sources: string;
+  /** Related earlier stories and papers already in Sphere, for the bigger picture */
+  related?: string;
+  now: Date;
+}
+
+export const STORY_ARTICLE_SECTIONS = ["What's happening", "Source breakdown", "The bigger picture"] as const;
+
+function createStoryArticlePrompt(context: StoryArticleContext): string {
+  const related = context.related ? `\n\n**Related coverage already in the reader's feed (for context only, do not cite):**\n${context.related}` : "";
+  return `Today is ${context.now.toISOString().slice(0, 10)}. Write a short news article about this developing AI story for a reader who wants to stay on top of the field.
+
+**Working headline:** ${context.headline}${context.summary ? `\n**Summary so far:** ${context.summary}` : ""}
+
+**Numbered sources (posts, articles, repos and discussions from different platforms):**
+${context.sources}${related}
+
+Write in Markdown with exactly these three sections:
+
+## ${STORY_ARTICLE_SECTIONS[0]}
+3-5 short paragraphs: what happened, who is involved, what was announced or released, and the timeline. Lead with the most important fact.
+
+## ${STORY_ARTICLE_SECTIONS[1]}
+One bullet per platform or outlet, starting with its name in bold (e.g. "- **Hacker News:** ..."). Say what that source reports or emphasises; for community discussions (Hacker News, Reddit, X) describe the reaction and sentiment, notable claims, and skepticism. Point out where sources agree or disagree.
+
+## ${STORY_ARTICLE_SECTIONS[2]}
+2-3 paragraphs interpreting what this means for the AI landscape: the trend it fits into, competitors and the wider ecosystem, implications for researchers and builders, and what to watch next. Clearly flag anything unconfirmed or speculative.
+
+Rules:
+- Cite sources inline with their numbers, like [1] or [2, 3], after the claims they support. Only cite sources you actually used.
+- Use only facts from the sources; for the interpretation you may use general knowledge of the AI field but label opinions as analysis.
+- Don't add a title, preamble or closing remarks outside the three sections.`;
+}
+
+async function streamWords(text: string, onChunk: (chunk: string) => void, delayMs = 15): Promise<void> {
+  const words = text.split(" ");
+  for (let i = 0; i < words.length; i++) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    onChunk(words[i] + (i < words.length - 1 ? " " : ""));
+  }
+}
+
+/** Streams the Markdown story article (What's happening / Source breakdown / The bigger picture) */
+export async function generateStoryArticleStreaming(
+  context: StoryArticleContext,
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
+): Promise<void> {
+  const config = getLLMConfig();
+  const prompt = createStoryArticlePrompt(context);
+
+  if (config.provider === "mock" || !config.apiKey) {
+    const article =
+      `## ${STORY_ARTICLE_SECTIONS[0]}\n\n${context.summary || context.headline} [1]\n\n` +
+      `## ${STORY_ARTICLE_SECTIONS[1]}\n\n- **Mock mode:** configure LLM_PROVIDER and LLM_API_KEY to generate a full article with a per-source breakdown.\n\n` +
+      `## ${STORY_ARTICLE_SECTIONS[2]}\n\nAnalysis is unavailable in mock mode; see the sources listed alongside this article.`;
+    await streamWords(article, onChunk);
+    onUsage?.(mockUsage(prompt, article));
+    return;
+  }
+
+  if (config.provider === "openai") {
+    const model = config.model || "gpt-4o-2024-08-06";
+    const stream = await new OpenAI({ apiKey: config.apiKey }).chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: NEWS_SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      stream: true,
+      ...openAIChatOptions(model, 2000, 0.4),
+    });
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) onChunk(content);
+      const usage = openAIChatUsage(model, chunk.usage);
+      if (usage) onUsage?.(usage);
+    }
+    return;
+  }
+
+  const model = config.model || DEFAULT_ANTHROPIC_MODEL;
+  const stream = await new Anthropic({ apiKey: config.apiKey }).messages.stream({
+    model,
+    ...anthropicOptions(4000),
+    system: NEWS_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: prompt }],
+  });
+  for await (const chunk of stream) {
+    if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") onChunk(chunk.delta.text);
+  }
+  await finishAnthropicStream(stream, model, onUsage);
+}
+
+// ---------------------------------------------------------------------------
+// Learn tab tutor (Epic 9)
+// ---------------------------------------------------------------------------
+
+export type TutorTurn = { role: "user" | "assistant"; content: string };
+
+/**
+ * Streams a tutor answer. `system` carries the lesson context and teaching rules
+ * (built by lib/learn/tutor.ts); history holds earlier turns of the conversation.
+ */
+export async function tutorChatStreaming(
+  system: string,
+  history: TutorTurn[],
+  message: string,
+  onChunk: (chunk: string) => void,
+  onUsage?: UsageCallback
+): Promise<void> {
+  const config = getLLMConfig();
+
+  if (config.provider === "mock" || !config.apiKey) {
+    const answer = `**Mock tutor:** you asked "${message}". With LLM_PROVIDER and LLM_API_KEY configured, I would answer using this lesson's mental picture and point you to the lessons it builds on.`;
+    await streamWords(answer, onChunk);
+    onUsage?.(mockUsage(system + history.map((t) => t.content).join("\n") + message, answer));
+    return;
+  }
+
+  const messages = [...history, { role: "user" as const, content: message }];
+
+  if (config.provider === "openai") {
+    const model = config.model || "gpt-4o-2024-08-06";
+    const stream = await new OpenAI({ apiKey: config.apiKey }).chat.completions.create({
+      model,
+      messages: [{ role: "system", content: system }, ...messages],
+      stream: true,
+      ...openAIChatOptions(model, 1500, 0.5),
+    });
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) onChunk(content);
+      const usage = openAIChatUsage(model, chunk.usage);
+      if (usage) onUsage?.(usage);
+    }
+    return;
+  }
+
+  const model = config.model || DEFAULT_ANTHROPIC_MODEL;
+  const stream = await new Anthropic({ apiKey: config.apiKey }).messages.stream({
+    model,
+    ...anthropicOptions(3000),
+    system,
+    messages,
+  });
+  for await (const chunk of stream) {
+    if (chunk.type === "content_block_delta" && chunk.delta.type === "text_delta") onChunk(chunk.delta.text);
+  }
+  await finishAnthropicStream(stream, model, onUsage);
+}

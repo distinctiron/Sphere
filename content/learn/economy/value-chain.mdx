@@ -1,0 +1,160 @@
+---
+id: value-chain
+title: The AI value chain
+summary: Who does what in the AI build-out, from lithography tools to apps, and why profits and power pool at a few links. Output is capped by the scarcest input, and margins go to whoever controls a link others cannot route around.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: []
+related: [gpu, accelerators, data-center, semiconductors, hyperscalers, unit-economics]
+keywords: ["AI supply chain", "value chain", "AI stack", "bottleneck", "chokepoint", "gross margin", "neocloud", "custom silicon", "AI infrastructure"]
+reviewed: 2026-09-29
+quiz:
+  - question: In a year when advanced packaging is the binding constraint on AI accelerators, a memory maker doubles its HBM output. What happens to the number of accelerators shipped?
+    options:
+      - It roughly doubles, because memory is a large part of each chip
+      - Almost nothing changes, because output is still capped by packaging; the extra memory waits for packaging slots
+      - It falls, because memory prices drop
+      - It rises in proportion to the share of cost that memory represents
+    answer: 1
+    explanation: Output of a chain is the minimum over its links. Expanding a link that is not binding adds slack, not output. The extra HBM has to wait for packaging capacity, and its price may even soften while packaging suppliers keep the pricing power.
+  - question: Server assemblers were also sold out during the 2023–24 accelerator shortage, yet their margins stayed thin while the chip designer's rose to about 75%. Which explanation fits the bottleneck picture best?
+    options:
+      - Assembling servers is less important to AI than designing chips
+      - Server assembly was scarce only briefly and many firms could do it, so buyers could route around any one assembler; the accelerator had no ready substitute
+      - Server assemblers chose to charge less to win market share
+      - Accounting rules require hardware makers to report low margins
+    answer: 1
+    explanation: Margins need two things together, scarcity now and no practical substitute. Many assemblers, and the buyers themselves, can build servers, so assembly capacity grows quickly and competition caps prices. The accelerator combined scarcity with years of lead in hardware and software that rivals could not copy quickly.
+  - question: Why do cloud providers invest billions in their own accelerators even when those chips trail the market leader on benchmarks?
+    options:
+      - Custom chips are always cheaper to manufacture
+      - A credible substitute lets them route around the chokepoint, which lowers what they pay the leader and secures supply, even if they buy both
+      - Governments require it
+      - Their own chips make models more accurate
+    answer: 1
+    explanation: Rent at a chokepoint depends on how hard it is for buyers to go elsewhere. A working in-house chip, even an imperfect one, gives the buyer an outside option for part of its demand and a bargaining position for the rest. That is a direct application of the bottleneck picture.
+  - question: A startup builds a popular app on top of another company's model API. According to the bottleneck picture, what most threatens its margin?
+    options:
+      - Nothing, because apps sit closest to the customer
+      - It controls no link that others cannot route around; rivals can call the same API, and the model provider can raise prices or build the same feature
+      - Electricity prices
+      - Export controls on chips
+    answer: 1
+    explanation: Being near the customer is not the same as controlling a scarce link. If the app's inputs are available to anyone and its product is easy to copy, competition pushes its price towards its cost. Apps keep margin when they own something hard to route around, such as distribution, proprietary data or deep workflow integration.
+---
+
+By 2025 a chip designer had become the most valuable company in the world, a Dutch maker of lithography machines had become a matter of foreign policy, and power utilities were appearing in AI news. None of them trains a model. Yet each earns a large share of what the world spends on AI, or holds leverage over how fast it can grow.
+
+This lesson gives you the map behind those stories: the chain of companies that turns sand, electricity and capital into a chatbot answer, and a rule for predicting where money and power pool along it. The rest of this path uses the same map, for chips, clouds, labs, costs, data centers and geopolitics.
+
+## The picture
+
+Think of the AI build-out as a **chain of inputs**, each produced by a different set of firms: lithography tools, chip fabrication, memory, packaging, servers and networks, power and land, capital, talent and data. They all feed model training and serving, and finally products that someone pays for. Two rules govern the chain.
+
+1. **Output is limited by the scarcest link.** A finished AI accelerator needs a logic die *and* high-bandwidth memory *and* a packaging slot *and* a powered rack to run in. If any one of these is short, extra supply of the others just waits. The link that sets the ceiling is the <Term id="binding-constraint">binding constraint</Term>.
+2. **Profit and leverage go to whoever controls a link others cannot route around.** When demand exceeds the binding link's capacity, buyers bid up its price. If new suppliers can enter quickly, that premium is brief. If they cannot, because of a monopoly on a machine, years of process learning, or a software ecosystem, the premium persists. Such a link is a <Term id="chokepoint">chokepoint</Term>, and the persistent premium is an <Term id="economic-rent">economic rent</Term>.
+
+Governments act on the same map. They try to **secure** the chokepoints they depend on, with subsidies and onshoring, and to **deny** the ones their rivals depend on, with export controls.
+
+<Figure
+  name="bottleneck-chain"
+  interactive
+  title="Output is set by the shortest bar"
+  caption="Four links that must all be present for an accelerator to run, against demand. The black line is output: the minimum of demand and every link's capacity. The binding link glows rose. Expand links one at a time, or switch the stylised year."
+  notice="Expanding a link that is not binding changes nothing. Expanding the binding one raises output only until the next-shortest bar binds, and the pricing power moves with it."
+/>
+
+<KeyIdea>
+
+To place any AI news story, ask two questions. **Which link is binding right now?** That tells you where output is capped and where prices are rising. **Can anyone route around it, and how fast?** That tells you whether the premium is a temporary shortage or a lasting rent, and it is exactly the question governments ask when they pick what to subsidise or deny.
+
+</KeyIdea>
+
+## The stack, layer by layer
+
+Read the chain from the bottom up. Each layer buys from the one below and sells to the one above.
+
+- **Equipment and design software.** Chips are printed with lithography machines. The most advanced kind, extreme-ultraviolet (EUV) lithography, is made by exactly one company, ASML in the Netherlands. Deposition, etching and inspection tools come from a handful of US and Japanese firms (Applied Materials, Lam Research, KLA, Tokyo Electron). Chip design software (EDA) is dominated by Synopsys and Cadence.
+- **Fabs.** Leading-edge logic chips are manufactured by a <Term id="foundry">foundry</Term>. For AI accelerators that effectively means TSMC in Taiwan, with Samsung and Intel trying to catch up.
+- **Memory and packaging.** An accelerator sits beside stacks of <Term id="hbm">high-bandwidth memory</Term> (HBM), supplied by just three firms: SK hynix, Samsung and Micron. The logic die and memory stacks are joined by advanced packaging, mostly TSMC's CoWoS process.
+- **Chip design.** Nvidia designs most AI accelerators sold on the open market, with AMD a distant second. The largest buyers also design <Term id="custom-silicon">custom silicon</Term>, such as Google's TPU and Amazon's Trainium, usually with partners like Broadcom or Marvell. Arm licenses the CPU designs many of these systems use.
+- **Systems and networking.** Contract manufacturers such as Foxconn and Quanta (<Term id="odm">ODMs</Term>), plus server brands like Dell and Supermicro, assemble chips into racks. Switch, cable and optics makers wire thousands of racks together.
+- **Cloud.** A few <Term id="hyperscaler">hyperscalers</Term> (Amazon, Microsoft, Google, and increasingly Oracle, with Meta building for itself) buy most of this hardware, put it in data centers and rent it out. Newer GPU-focused clouds, <Term id="neocloud">neoclouds</Term> such as CoreWeave and Nebius, do the same with a narrower offer.
+- **Model labs** rent or own that compute to train and serve models: OpenAI, Anthropic, Google DeepMind, Meta, xAI, and in China DeepSeek, Alibaba's Qwen team and others.
+- **Applications** turn models into products people pay for: coding tools, assistants, enterprise software.
+
+<Recall id="gpu">
+
+A GPU runs thousands of simple arithmetic units in parallel, which suits the large matrix multiplications at the heart of neural networks. What limits it in practice is often not arithmetic but how fast memory can feed it: hence the importance of HBM and of packaging memory right next to the chip.
+
+</Recall>
+
+That is why memory and packaging are separate, strategic links rather than commodity parts: the chip is only as useful as the bandwidth next to it. The <LessonLink id="accelerators" /> and <LessonLink id="data-center" /> lessons in the Compute path cover the hardware itself; here we care about who supplies it and on what terms.
+
+## Why margins sit where they do
+
+<Figure
+  name="value-chain-stack"
+  title="Follow a dollar down the stack"
+  caption="Each layer with its leading players, the number of credible suppliers at the frontier, and a rough gross margin for the leaders (around 2024–25). A dollar of customer spending falls through the stack; each layer keeps its margin and passes the rest down as purchases."
+  notice="The widest margins sit where the supplier count is one or a handful: EUV tools, the leading-edge fab, memory and packaging, and the dominant chip designer. Layers with many substitutes, such as server assembly, keep thin margins despite doing essential work."
+/>
+
+<Term id="gross-margin">Gross margin</Term> is revenue minus the direct cost of what was sold, as a share of revenue. It is a good first read of pricing power. The figure shows the pattern the picture predicts: margins are high where a link is **both** scarce **and** hard to route around, and thin where it is only one of the two.
+
+Several things make a link hard to route around, and they differ in how long they last:
+- **A unique machine or process** (EUV lithography). Replicating it took ASML and its suppliers decades.
+- **Accumulated learning** (TSMC's yields at the newest node). Each generation of chips teaches the fab things rivals must learn separately, so the leader's lead compounds. <Preview id="semiconductors">Why fabs work this way</Preview> is the next lesson.
+- **An ecosystem** (Nvidia's software stack, which most AI code is written for). Switching means rewriting and re-tuning software, not just buying different chips.
+- **Physical scarcity with long lead times** (grid connections, gas turbines, sites near power). These are not monopolies, but they take years to add.
+
+Scarcity alone is not enough. During the 2023–24 accelerator shortage, server assemblers were also sold out, but many firms can assemble servers and big buyers can design their own racks. Assembly capacity grew within months and competition kept gross margins at roughly 10–15%.
+
+<Example title="where one accelerator's price goes">
+
+Suppose an accelerator sells for about **\$30,000**, the reported ballpark for Nvidia's H100 in 2023–24, and that Nvidia's company-wide gross margin of roughly **75%** (its fiscal year to January 2025) applies to it. Both are rough; the real margin varies by product.
+
+- The chip designer keeps about \$30,000 × 0.75 = **\$22,500** of gross profit. That pays for research and software, and the rest is profit.
+- About **\$7,500** buys everything physical: the TSMC-made logic die, the HBM stacks, the packaging, the board and testing. Every one of those suppliers is itself profitable.
+- A server maker then puts eight of these into a server costing a few hundred thousand dollars, and keeps a gross margin of roughly **10%** on its much larger revenue.
+
+The same chip passes through firms with margins of roughly 75% and 10%. The difference is not effort or importance. It is how easily each can be replaced.
+
+</Example>
+
+## Bottlenecks move
+
+The binding link is not fixed. When a link binds, its price rises, its suppliers invest, and within a year or two it stops binding. The constraint then moves to the next-shortest bar, and pricing power moves with it. The rough sequence reported since the ChatGPT launch (in practice the links overlapped, and each stayed tight for longer than a list suggests):
+- **2023:** advanced packaging (CoWoS) capacity was the most-cited cap on accelerator shipments;
+- **2024:** packaging expanded, and HBM became tight, with suppliers reporting output sold out a year ahead;
+- **2025–26:** the newest chips were still in short supply, but builders increasingly named **powered sites** as what limited how fast they could put chips to work: grid connections, turbines, transformers and permission to build (see <Preview id="buildout">the build-out lesson</Preview>).
+
+There is one more link, at the top: **demand**. Every layer's revenue ultimately depends on end customers paying for AI products, or on investors paying in advance on their behalf. If that link weakens, the whole chain has spare capacity at once, and margins fall at every layer that is not a true chokepoint. Whether that demand justifies the spending is the subject of <Preview id="hyperscalers">the hyperscaler lesson</Preview>.
+
+## Reason with it
+
+**TSMC doubles its advanced packaging capacity in a year when packaging binds. Who gains pricing power, and who loses it?** Output rises until the next-shortest link binds, say HBM or power. Packaging's premium shrinks because it is no longer scarce. The memory makers or site owners that now bind gain leverage. The accelerator designer ships more chips, but may have to pay more for memory. One investment moves rents along the chain.
+
+**Why would a cloud provider spend billions on its own accelerator that is slower than the market leader's?** Because rent at a chokepoint depends on the buyer's outside option. A working in-house chip can serve some of the provider's demand, secures supply, and improves its bargaining position on everything it still buys from the leader. The chip can be worth building even if it never beats the leader on benchmarks: routing around a chokepoint is valuable in itself.
+
+**A startup's product is a thin layer on another company's model API. Where does its margin go?** Towards zero, unless it controls something scarce. Competitors can call the same API, and the model provider can raise prices or ship the same feature. Applications keep margin when they own a link that is hard to route around: distribution to customers, proprietary data, or integration deep enough that switching is costly.
+
+## Where this picture breaks
+
+- **Buyers have power too.** The picture focuses on suppliers. But the largest buyers are few and huge, and a handful of hyperscalers account for a large share of AI chip purchases. Concentrated buyers can push prices down, and they design their own chips precisely to do so.
+- **Margins are not the only goal.** Some firms deliberately lose money to hold a position: labs subsidise usage to win users, and hyperscalers may price compute cheaply to win AI workloads. Low margins in a layer can be a strategy, not weakness.
+- **Layers blur.** Google designs TPUs, runs a cloud, trains Gemini and sells apps, so its rents do not show up in any single layer. Vertical integration is itself a way to route around other people's chokepoints.
+- **Capacity responds with lags and overshoots.** Memory has a long history of boom and bust: shortages trigger investment that arrives all at once and becomes a glut. Today's chokepoint can be tomorrow's surplus.
+- **Some inputs are hard to measure.** Talent and data are real links, but they are not sold in units, so their scarcity shows up indirectly, in salaries, acquisitions and licensing deals.
+
+## Why it matters in the feed
+
+When a headline says a memory maker's HBM is "sold out through next year", read it as a report of the binding link and of who holds pricing power. When a hyperscaler announces a new in-house chip, read it as an attempt to route around a chokepoint. When a utility or turbine maker reports a record backlog, the constraint has moved to power. And when a government announces subsidies or export rules, ask which link it is trying to secure or deny, and how quickly the other side can route around it. That question organises the rest of this path.
+
+## Recap
+
+- The AI build-out is a chain: equipment and design software → fabs → memory and packaging → chip design → systems → cloud → labs → applications, with power, land, capital, talent and data feeding in.
+- **Output is capped by the binding link.** Expanding any other link adds slack, not output.
+- **Margins go to links that are both scarce and hard to route around:** EUV tools, the leading-edge fab, HBM and packaging, and the dominant accelerator and its software. Scarce but replaceable links, like server assembly, stay thin.
+- Bottlenecks **move** as suppliers respond: packaging, then memory, then powered sites. Demand is the final link that all the others depend on.
+- States act on the same map, securing chokepoints they need and denying those their rivals need.

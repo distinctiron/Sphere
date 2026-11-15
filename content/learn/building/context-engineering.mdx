@@ -1,0 +1,160 @@
+---
+id: context-engineering
+title: Context engineering
+summary: Prompting is designing the context the model continues. Instructions, examples, structure and ordering all shape which continuation is likely, and the window is a budget of cost, latency and attention that caching and careful selection make go further.
+minutes: 11
+model: context-machine
+buildsOn: [model-api, attention]
+related: [inference, post-training, rag, evals]
+keywords: ["context engineering", "prompt engineering", "few-shot", "prompt caching", "lost in the middle", "long context", "context rot", "system prompt", "needle in a haystack"]
+quiz:
+  - question: A team adds “Current time - 14:03:27” as the first line of its 12,000-token system prompt. Their provider caches repeated prompt prefixes. What happens to cost and latency?
+    options:
+      - Nothing, because the timestamp is only a few tokens long
+      - The prefix now changes on every request, so nothing after the first line can be reused from the cache; every call pays full prefill and full input price
+      - Only the timestamp line misses the cache
+      - The cache is used but the answer quality drops
+    answer: 1
+    explanation: A prefix cache reuses the stored keys and values of the longest prefix identical to an earlier request. Every later token's keys and values depend on everything before it, so a change in the first line invalidates everything after it. Put volatile content after the stable part.
+  - question: To be safe, a developer raises retrieval from 5 to 40 passages per question. Answers get worse. Which explanation fits the picture?
+    options:
+      - The model has a hard limit of 5 passages
+      - More passages always make answers better, so the drop must be random
+      - Passages beyond the fifth are ignored completely
+      - Extra passages compete for the model's attention; many are similar but irrelevant, so they distract, and the relevant ones may now sit in the middle of a long context where they are used less reliably
+    answer: 3
+    explanation: Every token in the window is something the model may attend to. Near-miss passages look relevant and pull the answer off course, and long contexts are used less reliably than short ones, especially in the middle. More context is not free even when it fits.
+  - question: All three few-shot examples in a prompt answer with exactly three bullet points. What should you expect?
+    options:
+      - The model will tend to answer with three bullet points even when the content calls for more or fewer
+      - The model will ignore the examples' format and follow only the written instructions
+      - The model will average the examples into one
+      - Nothing; examples only affect tone
+    answer: 0
+    explanation: The model continues the context, and examples are the most concrete evidence of what a good continuation looks like, including accidental regularities. Vary the examples along every dimension you do not want copied.
+  - question: Using attention, why might a fact placed in the middle of a very long context be used less reliably than the same fact at the end?
+    options:
+      - Tokens in the middle are deleted by the tokenizer
+      - Attention only looks at the last 1,000 tokens
+      - Each new token's attention weights are a softmax over every earlier token, so they must sum to one; with many competing tokens a relevant one can receive little weight, and trained models tend to favour the start and the most recent text
+      - The KV cache drops the middle of the context
+    answer: 2
+    explanation: Attention lets every token look at the whole context, but the weights are shared out by a softmax, so more tokens means more competition. The positional preference for the beginning and the end is an empirical finding about trained models, not a hard rule, and newer models reduce it without removing it.
+---
+
+"Prompt engineering" sounds like a collection of magic phrases. It is really something plainer and more useful: deciding **what the model reads**. From the model API lesson you know the model sees nothing but its context window. So every instruction, example, document, tool description and scrap of history you include is a lever on its output. Everything you leave out does not exist for it.
+
+This lesson turns that into a working method. Why do examples beat descriptions? Why does order matter? Why can more context make answers worse? And why is a context window better thought of as a budget than a container?
+
+## The picture
+
+<Recall id="model-api">
+
+A model API call is one context in, tokens out. The system prompt and messages are flattened into a single token sequence, and the model samples a continuation of it. The model keeps nothing between calls, so the harness rebuilds the whole context each time.
+
+</Recall>
+
+Put the path's model to work. The model is a function from context to a *probability distribution over continuations*. **<Term id="context-engineering">Context engineering</Term>** is choosing the context that makes the continuation you want the most probable one. Like any design problem, it is done under a budget. Every token you add:
+
+- **costs money and time.** It is billed as input and processed in prefill on every call that includes it.
+- **competes for attention.** It is one more thing the model may attend to instead of what matters.
+
+So the goal is not "as much relevant context as fits". It is **the smallest set of tokens that makes the right answer likely**, arranged so the model can use it.
+
+<KeyIdea>
+
+You do not instruct a model so much as *condition* it: the context shifts the distribution over what comes next. Good context engineering maximises signal per token. It puts what the model needs where the model will use it, leaves out what would distract it, and orders everything so the unchanging part can be reused from cache.
+
+</KeyIdea>
+
+## Instructions and examples
+
+**Instructions** work best when they read like a briefing for a capable newcomer who knows nothing about your situation. That means the goal, the audience, the constraints, what to do in the awkward cases and the format of the answer. Two habits pay off consistently.
+
+- **Say why.** "Keep answers under 100 words because they are shown in a narrow side panel" lets the model generalise to cases your rule did not list. "NEVER exceed 100 WORDS" invites both rigid over-application and arbitrary exceptions.
+- **Be specific where failure is likely.** Sphere's paper chat prompt tells the model to base answers on numbered passages, cite them inline as [1] or [2], cite only passages it actually used and never invent source numbers. Each clause exists because a model without it did the wrong thing.
+
+<Recall id="post-training">
+
+Post-training teaches a pretrained model to follow instructions in the chat format, through supervised examples of good responses and reinforcement learning from feedback. That is why models follow system prompts at all, and why prompting styles that work well can shift from one model generation to the next.
+
+</Recall>
+
+**Examples** (<Term id="few-shot-prompting">few-shot prompting</Term>) are the strongest signal you can give about format and style. A description of the output is one step removed from the output. An example *is* an output, and continuing a pattern is exactly what the model does. The catch is that the model copies *every* regularity in your examples, including accidental ones. If all three examples have three bullet points, expect three bullet points. If all use the same opening phrase, expect it again. Use a few diverse examples that vary along every dimension you do not want copied.
+
+## Structure and position
+
+Long contexts need **structure**, because the model has to find things in them. Mark sections clearly, with headings or tag-like delimiters such as `<paper>` and `</paper>` inside the prompt text, so the model can tell instructions from data and one document from another. Number sources, so they can be cited.
+
+**Position** matters because of how the model reads.
+
+<Recall id="attention">
+
+Each token builds a query and compares it with the keys of every earlier token. A <Term id="softmax">softmax</Term> turns those alignments into weights that sum to one, and the token's output mixes the earlier tokens' values in those proportions.
+
+</Recall>
+
+Attention gives every token a path to every earlier one, so in principle a fact anywhere in the window is reachable. In practice, the weights are shared out by a softmax, so more tokens means more competition for them. Trained models also show positional habits. In a widely cited 2023 study, models answering questions over many documents did best when the relevant document was near the **start** or the **end** of the context, and worst when it was in the **middle**. That pattern became known as <Term id="lost-in-the-middle">lost in the middle</Term>. Newer models have narrowed the gap, but the broader effect remains: performance tends to degrade as contexts grow long and cluttered, sometimes called <Term id="context-rot">context rot</Term>.
+
+Two practical rules follow. Put long reference material **first** and the question or task **last**, next to where the answer begins. And treat relevance as a precision problem, not a recall problem: a near-miss document is not neutral padding, it is a distraction that looks like evidence.
+
+## The window as a budget
+
+The same context is often sent thousands of times: every turn of every conversation re-sends the instructions, the tool definitions and the examples. That is where cost and latency concentrate, and where one more piece of the inference picture helps.
+
+<Recall id="inference">
+
+The <Term id="kv-cache">KV cache</Term> stores the keys and values of every token processed so far. A token's keys and values depend only on the tokens before it, so a server can keep the cache for a prompt prefix and skip prefilling that prefix when a later request starts the same way. Providers pass this on as cheaper "cached input".
+
+</Recall>
+
+<Term id="prompt-caching">Prompt caching</Term> reuses the longest prefix that is **byte-for-byte identical** to an earlier request. The first difference ends the match. Because every later token's keys and values depend on everything before it, nothing after that point can be reused, even if it is identical. That turns the *order* of your context into a cost decision: stable blocks first, volatile ones last.
+
+<Figure
+  name="prompt-cache-layout"
+  interactive
+  title="Same blocks, different order, different bill"
+  caption="The context of one turn in a chat assistant with tools and retrieval, top to bottom. On the next turn, the prefix cache reuses everything above the first block that changed (green); everything below it is prefilled and billed again (rose)."
+  notice="Moving a 20-token timestamp to the top throws away the cache for all 16,720 tokens. The block's size does not matter, only its position."
+/>
+
+<Example title="what ordering is worth">
+
+In the "stable first" layout, the instructions, tool definitions, examples and earlier turns (2,000 + 3,000 + 1,500 + 4,000 = 10,500 tokens) are identical to the last request. The next turn reuses them and processes only the 6,220 tokens that changed.
+
+If cached input costs 10% of the normal price (an illustrative rate; discounts vary by provider), the input bill for the turn is
+
+$$
+\frac{0.1 \times 10{,}500 + 6{,}220}{16{,}720} \approx 0.43
+$$
+
+of the uncached price, and prefill has 63% less work to do before the first token. Put the date at the top and both savings vanish. Put the retrieved passages straight after the instructions and only the first 2,000 tokens are reused: 89% of full price.
+
+</Example>
+
+## Reason with it
+
+**Why can adding more retrieved documents make answers worse?** Each extra document is more tokens competing for attention, and the documents most likely to be added are the ones that *look* relevant: they share words and topics with the question. Near misses pull the answer towards the wrong evidence. The relevant document may also end up in the middle of a long context, where it is used less reliably. The fix is better selection, not more volume. That is why <Preview id="rag">retrieval-augmented generation</Preview> lives or dies by the precision of its search.
+
+**Why do agents' system prompts put tool descriptions before everything else?** Tools rarely change within a session, the conversation grows at the end and the latest tool results change every step. Ordering from least to most volatile keeps the longest possible prefix identical from one call to the next. An agent that makes dozens of calls per task then prefills its instructions and tools once instead of dozens of times.
+
+**Why does a prompt that worked well on one model sometimes get worse on its successor?** The prompt conditions a distribution that post-training shaped. A newer model may follow instructions more literally, so emphatic warnings written to push an older model over the line now make it over-apply a rule. It may also no longer need scaffolding that used to help. Prompts are tuned to a model, which is why they need <Preview id="evals">evaluations</Preview> rather than trust.
+
+## Where this picture breaks
+
+- **"Signal per token" cannot be measured directly.** There is no gauge for how much a sentence helps. You find out by testing variations on real cases, which is what evaluations are for.
+- **Position effects are tendencies, not laws.** Lost in the middle describes averages on specific tasks. Some models and tasks show little of it, and the effect shifts with each model generation. Test rather than assume.
+- **Caching details vary by provider.** Some cache automatically and some need explicit markers; there are minimum prefix sizes, lifetimes measured in minutes, and sometimes a surcharge for writing the cache. The principle, identical prefix or no reuse, holds for all of them.
+- **Prompts are only half of context engineering.** The rest of this path is about context the harness gathers *while it runs*: tool results, retrieved passages, memory and summaries. The same budget logic applies to each.
+
+## Why it matters in the feed
+
+When a lab reports near-perfect "needle in a haystack" scores on a million-token window, remember that finding one planted sentence is the easiest long-context task. Using many scattered facts at once degrades much sooner. When the industry talk shifts from "prompt engineering" to "context engineering", it reflects this lesson: most of what a production model reads is assembled by code, not typed by a person. When a provider announces cheaper cached input, it is rewarding applications that order their context well.
+
+## Recap
+
+- The model continues whatever it is given (as in the model API lesson), so prompting is designing the context: conditioning a distribution rather than issuing commands that post-training guarantees.
+- Instructions work best with reasons and specifics; examples are the strongest signal and are copied in every detail, including accidental ones.
+- Attention shares its weights across the whole context, so extra tokens compete. Put long material first and the task last, and choose context for precision.
+- Prompt caching reuses the stored KV cache of an identical prefix, as in the inference lesson, so ordering stable blocks before volatile ones saves cost and time to first token.
+- Treat the window as a budget of money, latency and attention, not a container to fill.

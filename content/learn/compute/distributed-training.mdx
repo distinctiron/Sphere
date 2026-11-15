@@ -1,0 +1,182 @@
+---
+id: distributed-training
+title: Distributed training
+summary: Why frontier models are trained on tens of thousands of GPUs, and how the work is split. Data, tensor and pipeline parallelism each place a different kind of communication on the network, and the links between chips form another memory wall, one level up.
+minutes: 12
+model: feeding-the-math
+buildsOn: [memory-wall, accelerators, backpropagation, pretraining]
+related: [data-center, energy, gradient-descent, training-in-practice, hyperscalers]
+keywords: ["distributed training", "GPU cluster", "NVLink", "InfiniBand", "all-reduce", "data parallelism", "tensor parallelism", "pipeline parallelism", "FSDP", "training run"]
+quiz:
+  - question: You train a 20-billion-parameter model with Adam in mixed precision. Before counting activations, what is the smallest number of 80 GB GPUs that can hold the training state?
+    options:
+      - 1, because 20B parameters in BF16 is only 40 GB
+      - "2"
+      - 4, because each parameter needs about 16 bytes of weights, gradients, master weights and optimizer state, so 320 GB
+      - "16"
+    answer: 2
+    explanation: Training keeps far more than the weights. BF16 weights (2 bytes) and gradients (2), an FP32 master copy (4) and Adam's two running averages (4 + 4) come to about 16 bytes per parameter. 20 × 10⁹ × 16 = 320 GB, so at least four 80 GB GPUs, with the state sharded across them, and in practice more for activations.
+  - question: A data-parallel job all-reduces a 10 GB gradient every step using a ring. You double the number of GPUs in the ring from 64 to 128. What happens to the number of bytes each GPU sends per step?
+    options:
+      - It doubles
+      - It halves
+      - It stays almost the same, about 2 × 10 GB, because each GPU sends 2(N−1)/N of the gradient
+      - It grows with the square of the number of GPUs
+    answer: 2
+    explanation: In a ring each GPU sends its gradient in N chunks, N−1 times for the reduce-scatter and N−1 times for the all-gather, so it sends 2(N−1)/N of the gradient. That is 1.97× at 64 GPUs and 1.98× at 128. The bandwidth cost per GPU is almost independent of the ring size, which is why rings scale. What grows with N is the number of sequential steps, and so the latency.
+  - question: Which kind of parallelism is usually kept inside a single server or rack connected by NVLink, and why?
+    options:
+      - Data parallelism, because gradients are large
+      - Tensor parallelism, because it exchanges activations inside every layer, forward and backward, so it needs the fastest, lowest-latency links
+      - Pipeline parallelism, because stages must be close together
+      - None; placement does not matter
+    answer: 1
+    explanation: Tensor parallelism splits each matrix multiply across GPUs, so partial results have to be combined in every layer, many times per step, with compute waiting on each exchange. Data parallelism talks once per step and can overlap that with the backward pass, and pipeline parallelism only passes activations between neighbouring stages. Both tolerate slower links across the cluster.
+  - question: Using the pretraining cost rule, a lab plans a run with twice the parameters and twice the tokens of its last model, on the same hardware at the same utilisation. How does the GPU time change?
+    options:
+      - It doubles
+      - It roughly quadruples
+      - It grows eight times
+      - It stays the same if they double the GPUs
+    answer: 1
+    explanation: Training compute is about 6 × parameters × tokens, so doubling both multiplies it by 4. On the same hardware that is four times the GPU-hours. They can spread those over more GPUs to keep the calendar time down, but only if the parallelism and the network keep utilisation up.
+---
+
+A frontier language model is trained on tens of thousands of GPUs for weeks or months. The machines are wired together with so much network hardware that the network can cost a large share of the cluster, and a single run can be interrupted by hardware failures every few hours. Why can't this be done on fewer, faster chips? And once it is spread over thousands, what is the hard part?
+
+The path's picture answers both. Training is a mountain of arithmetic that has to be split up, and splitting it creates a new kind of data movement: between chips.
+
+## The picture
+
+<Recall id="pretraining">
+
+Pretraining a model with $N$ parameters on $D$ tokens costs about $6ND$ FLOPs: 2 per parameter per token for the forward pass and about 4 for the backward pass. A 405-billion-parameter model on 15 trillion tokens needs about $3.6 \times 10^{25}$ FLOPs, roughly 25 million GPU-hours on H100-class GPUs at 40% of peak.
+
+</Recall>
+
+Twenty-five million GPU-hours is about 2,900 years on one GPU. Spread over 16,000 GPUs, it is about two months. That is the first reason for distribution: **time**. The second is **memory**. As we will see, the training state of a large model is many times larger than any single chip's memory.
+
+So the model is split over many GPUs, and after each step they must agree on the update. The cluster behaves like one enormous computer whose "memory bus" is the network. And that network has a hierarchy, like the memory hierarchy inside a chip:
+
+| Link (H100 generation) | Bandwidth per GPU | Reaches |
+|---|---|---|
+| HBM, inside the GPU | ≈ 3,350 GB/s | its own memory |
+| <Term id="nvlink">NVLink</Term>, inside a server | ≈ 450 GB/s each way | 8 GPUs |
+| <Term id="infiniband">InfiniBand</Term> or Ethernet, across servers | ≈ 50 GB/s (400 Gb/s) | the whole cluster |
+
+Each step down is roughly **seven to ten times slower**.
+
+<Recall id="memory-wall">
+
+The roofline: a workload's arithmetic intensity is the operations it performs per byte it moves. Below the ridge point, peak FLOP/s ÷ bandwidth (about 300 for an H100 and its HBM), the chip waits on data; above it, arithmetic is the limit.
+
+</Recall>
+
+Apply the same roofline with the network in place of memory. To keep a GPU doing 990 TFLOP/s while it exchanges data over a 50 GB/s link, the work must do about 20,000 FLOPs for every byte it sends. Over NVLink it needs about 2,200.
+
+<KeyIdea>
+
+**Communication is the memory wall, one level up.** Every way of splitting training puts some traffic on the network. The design problem is to put the heaviest, most frequent traffic on the fastest links and to give each byte sent across the cluster enough arithmetic to hide it.
+
+</KeyIdea>
+
+## Why one GPU is not enough: memory
+
+<Recall id="backpropagation">
+
+Backpropagation sweeps backwards through the network, turning the error signal into a gradient for every weight. It needs each layer's values from the forward pass, so those activations are kept in memory until the backward pass reaches them. The sweep costs about twice the forward pass.
+
+</Recall>
+
+<Recall id="accelerators">
+
+Training runs its arithmetic in BF16 but keeps a higher-precision master copy of the weights (mixed precision), so that small updates are not lost to rounding.
+
+</Recall>
+
+Count the bytes each parameter needs during training with <Term id="adam">Adam</Term>, which keeps two running averages per parameter:
+
+<Example title="training memory per parameter">
+
+| Item | Bytes per parameter |
+|---|---|
+| Weights in BF16 | 2 |
+| Gradients in BF16 | 2 |
+| FP32 master weights | 4 |
+| Adam first moment (FP32) | 4 |
+| Adam second moment (FP32) | 4 |
+| **Total** | **16** |
+
+A 70B model needs $70 \times 10^9 \times 16$ = **1.12 TB** of training state: fourteen 80 GB GPUs before storing a single activation. A 405B model needs about **6.5 TB**. Activations add more, growing with batch size and sequence length. Recomputing some of them during the backward pass, instead of storing them, trades extra arithmetic for memory.
+
+</Example>
+
+## Three ways to split the work
+
+There are three basic ways to divide a training step, and large runs combine all three.
+
+<Figure
+  name="parallelism-modes"
+  interactive
+  title="Data, tensor and pipeline parallelism"
+  caption="A four-layer model and a batch split across four GPUs in three ways. Bars are layers (shaded: the part this GPU holds); squares are the parts of the batch it works on; rose arrows are the communication each scheme needs."
+  notice="What each scheme sends and how often: once per step for data parallelism, in every layer for tensor parallelism, between neighbours for pipeline parallelism."
+/>
+
+- **<Term id="data-parallelism">Data parallelism</Term>.** Every GPU holds a full copy of the model and processes a different slice of the batch. After the backward pass the GPUs average their gradients so that every copy takes the same step. It communicates once per step, and the transfer can overlap the end of the backward pass. The weakness is memory: every GPU holds all 16 bytes per parameter. <Term id="sharded-data-parallel">Sharded data parallelism</Term> (ZeRO, FSDP) fixes that by giving each GPU only a slice of the state and fetching the rest just in time, at the cost of more traffic.
+- **<Term id="tensor-parallelism">Tensor parallelism</Term>.** Each layer's weight matrices are split, for example by columns, so each GPU does part of every matrix multiply. The partial results must be combined inside every layer, forward and backward: frequent, latency-sensitive traffic that only NVLink can carry fast enough.
+- **<Term id="pipeline-parallelism">Pipeline parallelism</Term>.** Consecutive layers go to different GPUs, and the batch flows through them as a sequence of micro-batches. Only activations cross between neighbouring stages, which is modest traffic. The cost is the **bubble**: stages sit idle while the pipeline fills and drains.
+
+Mixture-of-experts models add a fourth split, **expert parallelism**, which places different experts on different GPUs and routes each token to the right one.
+
+The combination follows the link hierarchy. Meta's Llama 3 405B run on 16,384 H100s used tensor parallelism of 8 (the 8 GPUs of one NVLink server), pipeline parallelism of 16 (across servers) and data parallelism of 128 over the rest: 8 × 16 × 128 = 16,384. The most talkative split sits on the fastest links, the least talkative on the slowest.
+
+## Averaging gradients: the ring all-reduce
+
+Data parallelism needs an <Term id="all-reduce">all-reduce</Term>: every GPU contributes a gradient and every GPU ends up with the sum. The naive way, sending everything to one GPU and back, jams that GPU's link. The standard answer is a ring.
+
+<Figure
+  name="ring-allreduce"
+  title="Ring all-reduce across four GPUs"
+  caption="Each GPU splits its gradient into four chunks and exchanges one chunk per step with its neighbour. Three reduce-scatter steps leave each GPU with one fully summed chunk; three all-gather steps copy those chunks to everyone."
+  notice="Every link is busy at every step, and no GPU ever sends more than a quarter of its gradient at a time."
+/>
+
+With $N$ GPUs and a gradient of $S$ bytes, each GPU sends $2\,\frac{N-1}{N}\,S$ bytes, almost exactly $2S$ however many GPUs join. The time is about $2S$ divided by the per-GPU link bandwidth. That is the best possible use of the links, which is why rings, and the tree and hierarchical variants built for very large clusters, are the backbone of data parallelism.
+
+<Example title="gradient traffic for a 70B model">
+
+Train a 70B model on 1,024 GPUs with a batch of 4 million tokens per step.
+
+- **Compute per step:** $6 \times 70 \times 10^9 \times 4 \times 10^6 \approx 1.7 \times 10^{21}$ FLOPs. At 400 TFLOP/s per GPU (40% of peak), that is about **4.1 s**.
+- **Pure data parallelism across servers:** each GPU all-reduces the full 140 GB BF16 gradient over a 50 GB/s link: $2 \times 140 / 50 \approx$ **5.6 s**, longer than the compute. (It could not fit in memory anyway.)
+- **Tensor parallelism of 8 inside each server, data parallelism across:** each GPU now holds an eighth of the weights, so it all-reduces 17.5 GB: about **0.7 s**, which can be overlapped with the backward pass.
+
+</Example>
+
+## Reason with it
+
+**Why does distributed training like very large batches, and why can't the batch grow forever?** The gradient's size is fixed by the parameter count, while the compute per step grows with the number of tokens in the batch. A bigger batch means more FLOPs per byte communicated, so the cluster moves right on the network roofline. But beyond a certain batch size, averaging more examples no longer makes each step much more useful. The model then needs nearly as many steps as before, each more expensive, so the extra compute is wasted.
+
+**Why do newer systems put 72 GPUs in one NVLink domain?** Tensor and expert parallelism need NVLink-class bandwidth. With 8 GPUs per NVLink domain, any model that needs a wider split has to push per-layer traffic onto the slower cluster network. A rack-scale NVLink domain widens the fast tier ninefold, which matters most for the largest mixture-of-experts models. This drives the rack designs of <Preview id="data-center">the data center</Preview>.
+
+**Why is reliability a first-order problem?** Training is synchronous: a step cannot finish until every GPU finishes. With 16,000 GPUs, rare faults become frequent. Meta reported 419 unexpected interruptions during a 54-day Llama 3 run, about one every three hours. So runs checkpoint their state (terabytes) regularly and are built to restart fast. Each hour lost to a failure costs thousands of GPU-hours.
+
+## Where this picture breaks
+
+- **Communication and compute overlap.** Well-engineered systems send gradients while the backward pass is still running, and prefetch sharded weights before they are needed. Communication costs only what cannot be hidden, so simple "compute time + transfer time" sums overstate it.
+- **Utilisation is far from peak.** Large runs typically achieve 30–50% of the chips' peak FLOPs. Pipeline bubbles, stragglers, memory-bound operations and failures all take their share.
+- **Not all training is synchronous.** Research into low-communication and asynchronous methods, which let groups of GPUs drift apart and reconcile occasionally, aims to train across multiple data centers connected by much slower links.
+- **Post-training and reinforcement learning look different.** They mix training with large amounts of generation, which brings in the inference regime of <Preview id="inference">inference</Preview>.
+
+## Why it matters in the feed
+
+When a company announces a "100,000-GPU cluster", the scarce part is not only the GPUs. It is a network that lets them act as one machine: NVLink domains, InfiniBand or high-performance Ethernet fabrics, and the optical links between them. When you read about InfiniBand versus Ethernet, or about training spread across several sites, it is this lesson's link hierarchy being contested. And when a lab reports its <Term id="mfu">model FLOPs utilisation</Term>, it is telling you how well it beat the communication wall.
+
+## Recap
+
+- Training compute is about $6ND$, as in pretraining: thousands of GPU-years for a frontier model. Only parallelism brings that down to months.
+- Training state is about **16 bytes per parameter** with Adam and mixed precision, plus activations kept for backpropagation. A 70B model needs over a terabyte.
+- **Data, tensor and pipeline parallelism** each create different traffic: gradients once per step, activations in every layer, activations between stages.
+- Links form a hierarchy (HBM → NVLink → InfiniBand/Ethernet), each step roughly ten times slower. The most talkative split goes on the fastest links.
+- **Communication is another memory wall**: the roofline, with network bandwidth in place of HBM. A ring all-reduce moves about twice the gradient per GPU, whatever the cluster size.

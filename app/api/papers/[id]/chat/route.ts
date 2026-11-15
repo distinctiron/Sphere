@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getSessionUserId } from "@/lib/news/session";
+import { aiAccessDenied, authorizeAiUsage } from "@/lib/billing/account";
+import { meteredSseResponse } from "@/lib/billing/metered-stream";
+import { getChatContext, getFullTextFallback } from "@/lib/rag/context";
+import { buildRetrievalQuery, formatSourcesForPrompt, trimHistory } from "@/lib/rag/query";
 
 export const runtime = "nodejs";
 
@@ -8,20 +12,27 @@ export const runtime = "nodejs";
  * POST /api/papers/[id]/chat
  * Chat with paper using LLM streaming
  * Returns streaming response
+ *
+ * RAG (Story 7.6): each message retrieves fresh chunks for the current question
+ * (anchored to the previous question for short follow-ups). The first SSE event
+ * carries the citations: data: {"citations": [...]}. If retrieval is unavailable
+ * the paper's extracted text is used instead.
+ *
+ * Billing: every message is metered (lib/billing). Free users and empty
+ * wallets get 402 with a `code` the client uses to show the payment wall.
  */
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Check authentication
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const access = await authorizeAiUsage(userId);
+    if (!access.allowed) return aiAccessDenied(access);
 
     // Parse request body
     const body = await request.json();
@@ -46,26 +57,8 @@ export async function POST(
       );
     }
 
-    // Fetch full paper HTML content
-    let fullContent: string | undefined;
-    if (paper.htmlUrl) {
-      try {
-        const htmlResponse = await fetch(paper.htmlUrl, {
-          headers: {
-            "User-Agent": "Sphere Research Platform",
-          },
-        });
-        if (htmlResponse.ok) {
-          fullContent = await htmlResponse.text();
-        }
-      } catch (error) {
-        console.warn("Failed to fetch HTML content:", error);
-        // Continue without full content - will use abstract only
-      }
-    }
-
     // Validate conversation history format
-    const history: Array<{ role: "user" | "assistant"; content: string }> = [];
+    let history: Array<{ role: "user" | "assistant"; content: string }> = [];
     if (conversationHistory && Array.isArray(conversationHistory)) {
       for (const msg of conversationHistory) {
         if (
@@ -82,50 +75,42 @@ export async function POST(
       }
     }
 
-    // Create a streaming response
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          // Import LLM service dynamically to handle streaming
-          const { chatWithPaperStreaming } = await import("@/lib/llm");
-          
-          // Stream the chat response
-          await chatWithPaperStreaming(
-            message.trim(),
-            {
-              title: paper.title,
-              abstract: paper.abstract || "",
-              fullContent,
-            },
-            history,
-            (chunk: string) => {
-              // Send chunk as SSE format
-              const data = JSON.stringify({ chunk });
-              controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
-            }
-          );
+    // The client includes the message being sent as the last history entry;
+    // drop it so it isn't sent to the LLM twice and "first message" is detectable
+    const lastTurn = history[history.length - 1];
+    if (lastTurn?.role === "user" && lastTurn.content.trim() === message.trim()) {
+      history = history.slice(0, -1);
+    }
 
-          // Send completion signal
-          controller.enqueue(new TextEncoder().encode(`data: [DONE]\n\n`));
-          controller.close();
-        } catch (error) {
-          console.error("Error in chat stream:", error);
-          const errorData = JSON.stringify({ 
-            error: "Deep Dive service unavailable. Please try again." 
-          });
-          controller.enqueue(new TextEncoder().encode(`data: ${errorData}\n\n`));
-          controller.close();
-        }
-      },
-    });
+    // Keep the prompt within model limits: recent turns only
+    const trimmedHistory = trimHistory(history);
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      },
-    });
+    return meteredSseResponse(
+      { userId, feature: "paper-chat", billing: access.billing, paperId: paper.id },
+      "Deep Dive service unavailable. Please try again.",
+      async ({ send, onUsage }) => {
+        // Retrieve fresh context for this turn
+        const rag = await getChatContext(paper.id, buildRetrievalQuery(message.trim(), trimmedHistory));
+        send({ citations: rag.citations, ragStatus: rag.status });
+
+        const fullContent = rag.citations.length === 0 ? await getFullTextFallback(paper.htmlUrl) : undefined;
+
+        // Import LLM service dynamically to handle streaming
+        const { chatWithPaperStreaming } = await import("@/lib/llm");
+        await chatWithPaperStreaming(
+          message.trim(),
+          {
+            title: paper.title,
+            abstract: paper.abstract || "",
+            fullContent,
+            sources: rag.citations.length > 0 ? formatSourcesForPrompt(rag.citations) : undefined,
+          },
+          trimmedHistory,
+          (chunk: string) => send({ chunk }),
+          onUsage
+        );
+      }
+    );
   } catch (error) {
     console.error("Error in chat route:", error);
     return NextResponse.json(

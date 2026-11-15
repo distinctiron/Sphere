@@ -1,0 +1,144 @@
+---
+id: buildout
+title: "The build-out: power, land and permits"
+summary: Why electricity, not chips, became the binding link in 2025–26. What a gigawatt campus needs, why grid connections take years, how builders route around the grid with on-site gas and nuclear deals, and why local politics is now part of the AI supply chain.
+minutes: 11
+model: follow-the-bottleneck
+buildsOn: [hyperscalers]
+related: [energy, data-center, value-chain, sovereign-ai, unit-economics]
+keywords: ["data center", "gigawatt", "power grid", "interconnection queue", "gas turbines", "nuclear power", "small modular reactor", "power purchase agreement", "data center moratorium", "electricity prices"]
+reviewed: 2026-09-29
+quiz:
+  - question: A company can get accelerators in six months and build a data hall in eighteen, but a new grid connection at its preferred site takes five years. What sets the date its campus can run at full scale on grid power?
+    options:
+      - The chip delivery date
+      - The grid connection, because it is the longest item on the critical path; faster chips or buildings do not move it
+      - The date the building is finished
+      - The date the lab finishes its model
+    answer: 1
+    explanation: A project finishes when its longest dependent task does. Chips and buildings are ready long before the grid connection, so they wait. Only shortening the power path, by choosing a site with spare grid capacity or making power on-site, brings the date forward. That is the bottleneck picture applied to time.
+  - question: Gas turbines for on-site power become sold out for several years. According to the bottleneck picture, what gains value?
+    options:
+      - Nothing, because data centers can always use the grid
+      - Sites that already have a large grid connection or generation, such as former industrial plants or crypto-mining sites, and the turbine makers' order books
+      - Chips, because they no longer need power
+      - Land far from any power line
+    answer: 1
+    explanation: When one route around the grid is blocked, the remaining sources of fast power become scarcer. Sites with existing connections become valuable because they skip the queue, and turbine makers gain pricing power. This is why crypto miners with power contracts pivoted to hosting AI, and why old plant sites are sought after.
+  - question: Why do very large training campuses often go to remote places, while inference capacity is spread closer to users?
+    options:
+      - Training needs more cooling water
+      - Training needs one huge block of power in one place and tolerates distance from users; inference is smaller per site, needs reliability and reasonable latency, and can be split across many sites
+      - Inference cannot run on GPUs
+      - Remote places have faster internet
+    answer: 1
+    explanation: A frontier training run wants as much tightly connected compute as possible in one site, so it goes wherever a gigawatt can be found fastest. Network latency of tens of milliseconds barely matters next to seconds of generation, but inference still benefits from redundancy and proximity to users and data, and fits into smaller sites.
+  - question: Using the unit-economics lesson, why do builders pay a premium for sites that can be powered a year earlier?
+    options:
+      - Because land prices rise over time
+      - Because accelerators lose value fast; a year of waiting for power is a year of their short economic life spent idle, and a year of a premium window missed
+      - Because regulators require it
+      - Because power gets cheaper each year
+    answer: 1
+    explanation: Chips are the largest and fastest-depreciating part of the investment. If they sit waiting for power, they age without earning, and the next generation arrives. Time-to-power therefore has a price roughly equal to a year of the fleet's earnings, which is why developers pay for powered sites, turbines and faster permits.
+---
+
+In 2023 the scarce thing in AI was chips. By 2025 the companies building AI talked less about chips and more about electricity: restarting a nuclear plant, trucking gas turbines onto a site in Memphis, signing power deals decades long, and arguing with county boards over noise, water and electricity bills. Campuses of one gigawatt or more, each drawing as much power as a mid-sized city, were announced in Texas, Louisiana, Ohio, the Gulf and northern Europe.
+
+This lesson explains why power, land and permission to build became the binding link, how builders try to route around it, and why that pulls local and national politics into the AI supply chain.
+
+## The picture
+
+<Recall id="hyperscalers">
+
+Hyperscalers turn capital into powered, networked compute and must earn it back over the short economic life of accelerators. By 2026 much of their spending went to sites and power as well as chips.
+
+</Recall>
+
+A data-center campus is itself a chain of inputs, and each has its own lead time: land, permits, a grid connection or on-site generation, electrical equipment, buildings and cooling, and finally chips and racks. From the bottleneck picture, the campus goes live when its **slowest** input arrives. Today that is almost always power.
+
+<Figure
+  name="campus-critical-path"
+  title="The critical path of a gigawatt campus"
+  caption="Typical durations for the main workstreams of a large campus. A cursor sweeps six years. Chips, racks and buildings take one to two and a half years; a new large grid connection often takes four years or more. On-site generation is the usual way to bring first power forward."
+  notice="Chips, the most expensive input, arrive last and quickest. The campus waits on the grid connection, so any way of shortening it is worth almost any price."
+/>
+
+<KeyIdea>
+
+For AI infrastructure the binding link is **time-to-power**: how soon a site can deliver hundreds of megawatts reliably. Chips arrive in months, buildings in a year or two, grid connections in years. Whoever holds powered land, or can make power on-site quickly, holds a chokepoint. Because power is local, regulated and shared with everyone else on the grid, that chokepoint runs through local politics.
+
+</KeyIdea>
+
+## What a gigawatt means
+
+<Recall id="energy">
+
+Power reaches a chip through a chain: generation, transmission lines, a substation and grid connection, transformers and switchgear inside the site, and power delivery on the board, and nearly all of it leaves again as heat that cooling must remove. For large AI clusters, power has become the constraint that sets how much compute a site can hold.
+
+</Recall>
+
+<Example title="one gigawatt, in chips and homes">
+
+- **Overheads.** Cooling and electrical losses take a share. With a power usage effectiveness of about 1.2 (total power ÷ power reaching the IT equipment), 1 GW supplies about **830 MW** to computers.
+- **Chips.** A rack of 72 current-generation accelerators draws roughly 120–140 kW. 830 MW ÷ ~130 kW ≈ 6,400 racks, or about **460,000 accelerators**, before networking and storage.
+- **Energy.** Running at 80% on average for a year: 1 GW × 8,760 h × 0.8 ≈ **7 TWh**, about the yearly electricity use of 650,000 American homes (at roughly 10.5 MWh each).
+- **Money.** Industry estimates put the all-in cost at several tens of billions of dollars per gigawatt, most of it for chips and systems (as of mid-2026; the figure depends heavily on which chips are assumed).
+
+</Example>
+
+Scale that up. US data centers used about 4.4% of the country's electricity in 2023, and a US government-funded study projected 7–12% by 2028. Worldwide, the International Energy Agency estimated data centers used around 1.5% of electricity in 2024 and projected that to roughly double by 2030. The totals are modest globally but highly concentrated: a few regions absorb most of the new load.
+
+## Why the grid is slow
+
+Connecting a large new load is not a matter of plugging in. The utility or grid operator must study how it affects the whole network, often demand new substations or transmission lines, and decide who pays. New generation, which the extra load needs, faces the same kind of process. The US <Term id="interconnection-queue">interconnection queues</Term> for generation and storage held roughly 2,600 GW of proposed projects at the end of 2023, about twice the entire existing fleet, with typical waits of around five years for projects that got built (Lawrence Berkeley National Laboratory figures; the total dipped somewhat in 2024 as stalled projects withdrew). Most queued projects never get built. New high-voltage lines take a decade or more to permit and build. Large transformers and switchgear have had lead times of two to four years.
+
+Grid operators also face a forecasting problem. Developers file requests for the same demand at several sites to see which comes through first, so the queue overstates real load. A utility that builds for phantom demand leaves its other customers paying for it; one that builds too little loses the investment to another region.
+
+## Routing around the grid
+
+Builders route around the slow link in several ways. Each creates a new scarcity of its own.
+- **Choose sites with spare power.** Former industrial plants, retired power-station sites and crypto-mining sites come with large existing connections. Several miners pivoted to hosting AI for this reason.
+- **Generate on-site, "behind the meter".** Gas turbines or engines on the campus bring first power forward by years; xAI's Colossus cluster in Memphis was brought up quickly this way in 2024, and the permits for its turbines became a local controversy. By 2025 the major turbine makers reported order backlogs stretching several years. <Term id="behind-the-meter">Behind-the-meter</Term> power also locks in fossil fuel use and local emissions.
+- **Buy long-term power from existing plants.** In <Term id="power-purchase-agreement">power purchase agreements</Term>, a buyer commits to buy a plant's output for years. Microsoft agreed in 2024 to buy the output of a restarted reactor at Three Mile Island for 20 years; Amazon and Meta signed deals with other nuclear plants.
+- **Back new nuclear.** Google, Amazon and others signed agreements with developers of <Term id="small-modular-reactor">small modular reactors</Term>, but those deliver in the 2030s at the earliest, too late for the current generation of campuses.
+- **Promise flexibility.** A data center that agrees to cut its load during the grid's rare peak hours can often connect sooner, because the grid then needs little new capacity. Researchers have estimated that even small amounts of curtailment could open up tens of gigawatts of existing US capacity.
+
+Location follows time-to-power. Texas offers a grid with faster connection rules; the Gulf states offer cheap gas, sun and fast permits; the Nordic countries offer cheap hydropower and cold air; China has been adding generating capacity faster than anyone else. Northern Virginia, the world's densest data-center market, has become constrained by its grid.
+
+## Local politics
+
+Power is shared. When a gigawatt campus connects, the cost of new lines and capacity is spread among everyone on the grid unless regulators decide otherwise. In the largest US grid region, PJM, the price paid to guarantee future power supply (the <Term id="capacity-market">capacity market</Term>) rose to record levels in its 2024 and 2025 auctions. PJM's independent market monitor attributed much of the increase to forecast data-center demand; others also point to power-plant retirements and changes to the market's rules. Consumers' bills rose with it. That makes data centers a household-bill issue.
+
+Other local concerns follow:
+- **Water.** Evaporative cooling uses a lot of it, which matters in dry regions; closed-loop liquid cooling uses far less.
+- **Noise, land and emissions,** especially from on-site generation.
+- **Jobs versus tax breaks.** A campus employs thousands during construction but relatively few people once running, while often receiving large tax incentives.
+
+Responses vary. Some places have restricted new connections, such as Dublin, where data centers used around a fifth of Ireland's electricity by 2023, and some US counties have tightened zoning. Others compete for projects with incentives and faster permits. National governments have moved to speed permitting and open federal land for data centers. The same map shapes <Preview id="sovereign-ai">states' push for domestic compute</Preview>.
+
+## Reason with it
+
+**Why would a lab put its largest training campus in rural Texas or the Gulf rather than next to the internet hubs of Northern Virginia?** Because time-to-power binds, and training tolerates distance. A training run exchanges data inside the campus, not with users, so a few tens of milliseconds of network latency to the rest of the world barely matter. What matters is a gigawatt available soon. The picture predicts that the biggest training sites follow power, not fibre.
+
+**Gas turbines sell out for years. What gains value?** Everything else that delivers fast power: sites with existing connections, old plant sites, mining sites with power contracts, and alternative on-site sources such as engines and fuel cells. The turbine makers gain pricing power too. Relieving one bottleneck by routing around it creates a scarcity in the route.
+
+**Why pay a large premium to be powered a year earlier?** From unit economics: accelerators are most of the investment and lose value fast. A year spent waiting for power is a year of their short economic life lost and, for a lab, a year of a premium window missed. Time-to-power is therefore worth roughly a year of the fleet's earnings.
+
+## Where this picture breaks
+
+- **Power does not bind everywhere.** Where generation is being added quickly, as in China, or is abundant and cheap, as in parts of the Gulf, chips or export licences bind first. The binding link is regional.
+- **Demand forecasts are unreliable.** Duplicate requests, efficiency gains and uncertainty about AI revenue mean the load that shows up may be far below what is filed.
+- **Chips can bind again.** A new generation with much better performance per watt can make existing sites more valuable and shift the scarcity back to the newest chips, memory or packaging.
+- **Rules can change fast.** Permitting reforms, grid-cost rules and local moratoria can open or close the bottleneck within a few years, which is faster than the physical build-out.
+
+## Why it matters in the feed
+
+When a company announces a "multi-gigawatt" campus, ask where its power comes from and when, since that date, not the chip order, decides when it runs. When a utility or turbine maker reports a record backlog, the bottleneck is visible in its order book. When a nuclear deal is signed, check whether it uses an existing plant (power soon) or a new design (power in the 2030s). And when a county fights a data center, look at who pays for the grid upgrades and who gets the tax revenue.
+
+## Recap
+
+- A campus is a chain of inputs with different lead times; it goes live when the **slowest** arrives, and today that is usually **power**.
+- One gigawatt feeds roughly half a million current accelerators and uses about 7 TWh a year; the cost is several tens of billions of dollars.
+- Grid connections take years because of queues, studies, lines and equipment. Builders route around them with powered sites, on-site generation, long-term nuclear contracts and flexible load, and each route creates its own scarcity.
+- Because power is shared and local, **who pays** for it makes data centers a political issue, extending the bottleneck picture from the hyperscaler lesson into local and national politics.

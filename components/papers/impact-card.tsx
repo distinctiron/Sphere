@@ -9,9 +9,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check, Plus, Loader2 } from "lucide-react";
+import { BrushTag, SketchRing } from "@/components/sketch";
+import { CheckIcon, PencilSpinner } from "./sketch-icons";
 
 interface ImpactCardProps {
   paper: {
@@ -76,21 +76,25 @@ export function ImpactCard({
   };
 
   return (
-    <Card
-      className="hover:shadow-lg transition-shadow"
-    >
+    <div className="sk-wrap hover">
+    <div className="sk-hatch" aria-hidden="true" />
+    <Card seed={`impact:${paper.id}`}>
       <CardHeader 
         className="cursor-pointer"
         onClick={() => onViewPaper?.(paper.id)}
       >
         <div className="flex items-start justify-between gap-4">
-          <CardTitle className="text-lg leading-tight line-clamp-2">
+          <CardTitle className="text-[26px] leading-tight line-clamp-2">
             {paper.title}
           </CardTitle>
           {paper.noveltyScore !== null && (
-            <Badge variant="secondary" className="shrink-0">
+            <SketchRing
+              seed={`impact-score:${paper.id}`}
+              size={52}
+              className="shrink-0 font-hand text-[22px] font-bold"
+            >
               {paper.noveltyScore.toFixed(1)}
-            </Badge>
+            </SketchRing>
           )}
         </div>
         <CardDescription className="line-clamp-2">
@@ -107,29 +111,27 @@ export function ImpactCard({
           </p>
         )}
         {paper.categories && paper.categories.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-3">
-            {paper.categories.slice(0, 3).map((category) => (
-              <Badge key={category} variant="outline" className="text-xs">
-                {category}
-              </Badge>
+          <div className="flex flex-wrap gap-x-3 gap-y-2 mt-3">
+            {paper.categories.slice(0, 3).map((category, i) => (
+              <BrushTag key={category} label={category} variant={`${paper.id}:${category}`} size="sm" delay={0.3 + i * 0.15} />
             ))}
             {paper.categories.length > 3 && (
-              <Badge variant="outline" className="text-xs">
+              <span className="self-center font-mono text-xs text-pencil">
                 +{paper.categories.length - 3}
-              </Badge>
+              </span>
             )}
           </div>
         )}
       </CardContent>
       <CardFooter className="flex items-center justify-between gap-2 pt-4">
         {publicationDate && (
-          <span className="text-xs text-muted-foreground">
+          <span className="font-mono text-xs text-pencil">
             Published {publicationDate}
           </span>
         )}
         {onAddToLibrary && (
           <Button
-            variant={isInLibrary ? "secondary" : "default"}
+            variant={isInLibrary ? "outline" : "default"}
             size="sm"
             onClick={handleAddToLibrary}
             disabled={isAdding || isInLibrary}
@@ -137,31 +139,31 @@ export function ImpactCard({
           >
             {isAdding ? (
               <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <PencilSpinner />
                 Adding...
               </>
             ) : isInLibrary ? (
               <>
-                <Check className="w-4 h-4 mr-2" />
+                <CheckIcon />
                 Added
               </>
             ) : (
               <>
-                <Plus className="w-4 h-4 mr-2" />
                 Add to List
               </>
             )}
           </Button>
         )}
         {feedback && (
-          <span className={`text-xs ml-2 ${
-            feedback.includes("Failed") ? "text-destructive" : "text-green-600"
+          <span className={`font-hand text-lg font-bold ml-2 ${
+            feedback.includes("Failed") ? "text-pen" : "text-[#1f8a57]"
           }`}>
             {feedback}
           </span>
         )}
       </CardFooter>
     </Card>
+    </div>
   );
 }
 

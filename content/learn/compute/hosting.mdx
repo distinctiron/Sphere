@@ -1,0 +1,144 @@
+---
+id: hosting
+title: "Hosting models: API, cloud or your own GPUs"
+summary: How to choose where a model runs, from a pay-per-token API to rented GPUs, your own servers or a laptop. Three napkin questions decide it. Does it fit (weights plus KV cache), how fast is it (bytes per step), and what does it cost (GPU-hours per token, which comes down to utilisation)?
+minutes: 11
+model: feeding-the-math
+buildsOn: [serving-at-scale, inference]
+related: [model-api, unit-economics, data-center, cpu, labs, sovereign-ai]
+keywords: ["open-weight model", "open-weight models", "self-hosting", "self-hosted", "vLLM", "llama.cpp", "Ollama", "local LLM", "GPU rental", "on-premises AI", "run locally"]
+reviewed: 2026-09-29
+quiz:
+  - question: You want to serve a 32B model (64 layers, 8 KV heads of dimension 128) in FP8, with an FP8 KV cache, to 16 users at once with up to 32,000 tokens of context each. About how much GPU memory do you need?
+    options:
+      - About 33 GB, the weights
+      - About 100–110 GB, so two 80 GB GPUs
+      - About 300 GB
+      - About 1 TB
+    answer: 1
+    explanation: Weights are about 33 GB at one byte per parameter. The KV cache holds 2 × 64 × 8 × 128 × 1 ≈ 131 KB per token, and 16 users × 32,000 tokens is 512,000 tokens, about 67 GB. With some overhead that is roughly 110 GB, more than one 80 GB GPU. The cache, not the weights, dominates.
+  - question: Two rented GPUs cost $5 per hour in total. An API serves the same open model for $1 per million output tokens. Ignoring engineering time, how many tokens per second must your deployment generate, averaged over the month, before self-hosting is cheaper?
+    options:
+      - About 14 tokens per second
+      - About 140 tokens per second
+      - About 1,400 tokens per second
+      - About 14,000 tokens per second
+    answer: 2
+    explanation: $5 per hour buys 5 million tokens' worth at the API price, so you break even at 5 million tokens per hour, 5,000,000 ÷ 3,600 ≈ 1,400 tokens per second, every hour of the month. A deployment that is busy only part of the day must reach that average, not just that peak. Utilisation, not the hardware, decides the comparison.
+  - question: A 70B model quantised to 4 bits (about 40 GB) runs on a laptop with 400 GB/s of memory bandwidth. Roughly what is the fastest it can generate for one user?
+    options:
+      - About 1 token per second
+      - About 10 tokens per second
+      - About 100 tokens per second
+      - It depends only on the laptop's CPU core count
+    answer: 1
+    explanation: Each token needs one pass over all the weights, so the ceiling is bandwidth ÷ weight bytes = 400 ÷ 40 = 10 tokens per second, and real engines reach somewhat less. The same model at 8B parameters (about 4.5 GB) would reach about 90. For local models, memory bandwidth and capacity decide what is usable.
+  - question: Why can an API provider usually offer a lower price per token than a small company running the same open model on its own rented GPUs?
+    options:
+      - The provider's GPUs are faster
+      - The provider pools many customers' traffic, so its GPUs run large, full batches most of the time, and each pass over the weights produces many tokens
+      - The provider uses a different model
+      - APIs skip the KV cache
+    answer: 1
+    explanation: Decode cost per step is mostly streaming the weights, shared by everyone in the batch. A provider with steady traffic from many customers keeps batches large and GPUs busy, spreading each GPU-hour over many tokens. A small deployment with bursty traffic pays for idle GPUs and small batches, so its cost per token is several times higher.
+---
+
+Sooner or later, anyone building with AI faces a hosting decision. You can call a model through an API and pay per token. You can rent GPUs and run an open-weight model yourself, or buy servers and put them in your own data center. Or you can run a smaller model on a laptop. The marketing for each option makes it sound obvious. With this path's picture you can size and price all of them on a napkin, and see which one fits your case.
+
+## The picture
+
+<Recall id="inference">
+
+Decode streams all the weights, plus every active user's KV cache, for each step. The cache holds 2 × layers × KV heads × head dimension × bytes per number for every token of context, and it grows with context length and the number of users. Throughput rises almost linearly with the number of users sharing each step.
+
+</Recall>
+
+Any deployment answers three questions, each tied to one part of the hardware:
+1. **Does it fit?** Capacity. Memory = weights (parameters × bytes per parameter) + KV cache (bytes per token × context × concurrent users) + overhead.
+2. **How fast is it?** Bandwidth. Time per decode step ≈ bytes read ÷ memory bandwidth, where bytes read = active weights + every user's cache.
+3. **What does it cost?** Utilisation. Cost per token = the hardware's cost per hour ÷ the tokens it actually produces per hour.
+
+The third question holds the surprise. Hardware costs the same per hour whether it is busy or idle, and the tokens it produces per hour depend on how full its batches are. So the economics of hosting are mostly the economics of **keeping batches full**.
+
+<Figure
+  name="deployment-sizer"
+  interactive
+  title="Size a deployment"
+  caption="Choose a model, a precision and hardware, then set context length, concurrent users, rental price and average utilisation. The boxes are the GPUs needed, filled with weights and KV cache; below are the speed per user, total throughput and cost per million output tokens."
+  notice="Raise the number of users with the 70B model: total throughput rises almost in step and the cost per million tokens falls, until the KV cache forces more GPUs. Then drop the utilisation to 10% and watch the cost multiply."
+/>
+
+<KeyIdea>
+
+Hosting comes down to three napkin calculations. Memory decides what fits, bandwidth decides how fast each user's tokens arrive, and utilisation decides what each token costs. A GPU-hour costs the same whether it produces one token or a million, so whoever keeps batches fullest serves most cheaply.
+
+</KeyIdea>
+
+## The options
+
+- **Pay-per-token API.** The provider runs the model, and you send requests (<Preview id="model-api">the model API</Preview>). You pay only for tokens, with no operations work, and closed frontier models are *only* available this way. The provider pools thousands of customers, so its batches stay full. Your data goes to a third party under contract, and you accept its rate limits, model changes and outages.
+- **Rented GPUs or dedicated endpoints.** You rent GPUs by the hour from a hyperscaler or a <Term id="neocloud">neocloud</Term>, or a dedicated endpoint from a hosting company, and run an <Term id="open-weights">open-weight</Term> model on it. You pay per <Term id="gpu-hour">GPU-hour</Term>, busy or not. In exchange you control the model version, the data path, fine-tuning and latency.
+- **Your own hardware.** Buying servers turns the hourly price into capital plus power, space and staff. It pays off with steady, high use, or where data must stay on your premises or in your country (<Preview id="sovereign-ai">sovereign AI</Preview>).
+- **Local.** A laptop, desktop or workstation runs a quantised small model with no network, no per-token fee and full privacy, at modest speed.
+
+For the <Term id="self-hosting">self-hosted</Term> options you run an <Term id="inference-engine">inference engine</Term>: software that applies the techniques of serving at scale. vLLM (which introduced paged attention) and SGLang (known for its prefix caching) are the common open-source servers for GPUs; TensorRT-LLM is Nvidia's. For local use, <Term id="llama-cpp">llama.cpp</Term> runs quantised models on CPUs, Apple chips and consumer GPUs, using its <Term id="gguf">GGUF</Term> file format, and tools like Ollama and LM Studio wrap it in a friendly interface.
+
+<Recall id="serving-at-scale">
+
+Serving engines keep batches full with continuous batching, fit more sequences with paged KV caches, reuse shared prompt prefixes, shrink bytes with 8- and 4-bit quantisation, and get several tokens per pass with speculative decoding.
+
+</Recall>
+
+## Sizing and pricing a deployment
+
+<Example title="a 70B model for a team">
+
+Serve a 70B model in FP8 to 32 users at once with 8,000 tokens of context each, on H100s rented at an illustrative $2.50 per GPU-hour.
+
+- **Fit.** Weights are about 70 GB. The FP8 cache holds 2 × 80 × 8 × 128 × 1 ≈ 0.16 MB per token; 32 users × 8,000 tokens is about 42 GB. With 10% overhead, **about 124 GB: two H100s**.
+- **Speed.** Each step reads about 112 GB across two GPUs' 6.7 TB/s: 17 ms in theory, about 34 ms if the engine reaches half the ideal. That is **about 30 tokens per second per user** and about 950 in total.
+- **Cost.** Two GPUs at $5 per hour produce about 3.4 million tokens per hour: **about $1.50 per million tokens** if always busy, and $3 at 50% utilisation.
+- **Scale up.** At 128 users the cache needs four GPUs, per-user speed stays about the same, and throughput rises to about 3,600 tokens per second. The cost falls to **about $0.80 per million** at full load.
+
+</Example>
+
+For comparison, API providers serving open 70B-class models have commonly charged around a dollar or less per million output tokens (2025–26). They are not magic. They run the scaled-up version of this example, with bigger batches, better kernels and higher utilisation than a single team can reach.
+
+Two more service targets shape the choice. Interactive chat needs roughly 20 or more tokens per second per user to feel fluent, and agents and coding tools want more, since their outputs are read by programs that wait. Offline jobs such as classification or summarising a backlog need no per-user speed at all, so they can run huge batches. Long contexts push costs up quickly: every extra token of context per user is cache that must be stored and read on every step, which cuts the number of users per GPU.
+
+## Running models locally
+
+<Recall id="cpu">
+
+A processor's memory has a latency and a bandwidth. Generating a token touches every weight once, so on a laptop the ceiling is bandwidth ÷ model size, whatever the core count.
+
+</Recall>
+
+Local speed follows the same roofline with smaller numbers. A thin laptop has roughly 100 GB/s of memory bandwidth; a high-end laptop with unified memory, 400–550 GB/s; a high-end consumer graphics card, 1–2 TB/s but only 24–32 GB of memory. An 8B model at 4 bits (about 4.5 GB) therefore tops out around 20 tokens per second on the thin laptop and about 90 on the high-end one. A 70B model at 4 bits (about 40 GB) needs a machine with 48 GB or more and manages about 10. Local models are also mostly used by one person at a time, batch size 1, the least efficient point on the roofline. They make sense for privacy, offline use and experimentation, not for cheap bulk throughput.
+
+## Reason with it
+
+**When does self-hosting beat the API on cost?** When you can keep the GPUs busy. Two GPUs at $5 per hour cost about $3,600 a month. At $1 per million tokens from an API, you break even at 3.6 billion tokens a month, about 1,400 tokens per second around the clock. Below that average, you are paying for idle GPUs and the API is cheaper. Add engineering and on-call time, and the break-even rises further.
+
+**Why do companies self-host smaller models even when a bigger API model is better?** Cost is only one of the three questions. A specialised model fine-tuned on your data may match a larger general model on your task. It may need to run where data cannot leave, or answer within a strict latency budget, or at a volume where the per-token price dominates. The quality gap has to be measured on your own evaluations, not assumed.
+
+**Why is a million-token context expensive to self-host, even for a small model?** For the 8B model at 0.13 MB per token, one million tokens of BF16 cache is about 130 GB: more than an H100 holds, for a single user. Each decode step reads all of it. Per user, the cache now dwarfs the weights, so the cost per token is set by the context, not the model size.
+
+## Where this picture breaks
+
+- **The sizer is idealised.** It ignores prefill load, prefix caching and speculative decoding, and real engines reach 20–70% of the ideal depending on the workload. Measure with your own traffic before committing.
+- **Operations cost money.** Redundancy, headroom for peaks, monitoring, security patches and engineers' time can exceed the GPU bill for small deployments.
+- **Prices move fast.** GPU rental prices and API prices have both fallen sharply and vary widely by provider and contract length. Treat the defaults as illustrations.
+- **Models are not interchangeable.** Open-weight licences differ (some restrict use or scale), and the same model served at different precisions or by different providers can behave measurably differently.
+
+## Why it matters in the feed
+
+When an open-weight model is released with "runs on a single H100" or "fits on a laptop", check the precision and context assumed: they decide the fit. When GPU rental prices fall or rise, the break-even between API and self-hosting moves with them. When a company or country announces on-premises or sovereign AI hosting, it has decided that control over data and supply is worth paying for idle capacity. And when an API cuts prices, suspect higher utilisation and better serving software, the subject of the previous lesson.
+
+## Recap
+
+- Hosting answers three questions: **fit** (weights + KV cache against memory), **speed** (bytes per step against bandwidth, as in inference) and **cost** (GPU-hours ÷ tokens produced).
+- **APIs** pool demand and keep batches full; **rented GPUs** and **own hardware** trade that for control, and win on cost only at high, steady utilisation.
+- Inference engines such as vLLM, SGLang and llama.cpp apply the serving-at-scale techniques: continuous batching, paging, prefix caching and quantisation.
+- **Long context** raises costs through the KV cache, which can outgrow the weights.
+- **Local models** are limited by memory bandwidth and capacity, the CPU lesson's bandwidth ceiling at laptop scale: good for privacy and experiments, not for cheap volume.

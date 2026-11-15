@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { RegisterForm } from "@/components/auth/register-form";
 
 export default async function RegisterPage() {
@@ -11,11 +12,9 @@ export default async function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
-        <RegisterForm />
-      </div>
-    </div>
+    <AuthShell wide>
+      <RegisterForm />
+    </AuthShell>
   );
 }
 

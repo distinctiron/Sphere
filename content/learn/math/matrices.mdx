@@ -1,0 +1,168 @@
+---
+id: matrices
+title: Matrices as transformations of space
+summary: A matrix moves every point of a space at once. Its columns say where the axes land, its rows are directions it measures, multiplying matrices chains transformations, and rank says how much of the space survives.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [vectors]
+related: [forward-pass, gpu]
+keywords: ["matrix", "matrices", "matrix multiplication", "matmul", "linear algebra", "low-rank", "LoRA", "linear transformation", "weight matrix"]
+quiz:
+  - question: A 2×2 matrix has columns (0, 1) and (−1, 0). What does it do to the plane?
+    options:
+      - Stretches it to twice its size
+      - Rotates it 90° anticlockwise
+      - Flattens it onto a line
+      - Swaps the two axes like a mirror
+    answer: 1
+    explanation: The columns are where the axes land. e₁ = (1, 0) goes to (0, 1), a quarter turn anticlockwise, and e₂ = (0, 1) goes to (−1, 0), also a quarter turn. Since the whole grid follows its axes, every point turns by 90°. A mirror that swaps the axes would send e₁ to (0, 1) but e₂ to (1, 0).
+  - question: You stretch the x-axis by 2 and then rotate 90°. A friend rotates 90° first and then stretches the x-axis by 2. Where does the point (1, 0) end up in each case?
+    options:
+      - Both at (0, 2)
+      - Yours at (0, 2), your friend’s at (0, 1)
+      - Both at (2, 0)
+      - Yours at (0, 1), your friend’s at (0, 2)
+    answer: 1
+    explanation: Stretch then rotate sends (1, 0) to (2, 0), then to (0, 2). Rotate then stretch sends (1, 0) to (0, 1), which the x-stretch leaves alone. Matrix multiplication chains transformations, and in general the order matters, AB ≠ BA.
+  - question: A network maps a 4,096-dimensional vector down to 1,024 dimensions with one matrix, then back up to 4,096 with another. What can you conclude about the combined 4,096 → 4,096 map?
+    options:
+      - It can represent any 4,096 × 4,096 matrix
+      - Its rank is at most 1,024, so at least 3,072 input directions are flattened to zero and lost
+      - It is always the identity
+      - It has more parameters than a single 4,096 × 4,096 matrix
+    answer: 1
+    explanation: Everything passes through a 1,024-dimensional space in the middle, so the output can vary along at most 1,024 independent directions. Of the 4,096 input directions, at least 3,072 must be squashed to zero and are unrecoverable. That bottleneck costs 2 × 4,096 × 1,024 ≈ 8.4M parameters instead of 16.8M, the same trade that low-rank fine-tuning (LoRA) makes deliberately.
+  - question: In the row picture of y = Wx, when is the first output coordinate y₁ large and positive?
+    options:
+      - When x is long, whatever its direction
+      - When x points in a similar direction to the first row of W
+      - When x is perpendicular to the first row of W
+      - When the first column of W is long
+    answer: 1
+    explanation: y₁ is the dot product of the first row with x. From the vectors lesson, a dot product is large and positive when the two point the same way, zero when they are perpendicular and negative when they are opposed. Each row is a direction the matrix measures, which is exactly how a layer of neurons reads its input.
+---
+
+Every layer of every neural network does one thing over and over: it multiplies a vector by a <Term id="matrix">matrix</Term>. When a lab announces a 70-billion-parameter model, nearly all of those parameters are the entries of such matrices, and nearly all of the computing power in AI data centers is spent multiplying them. So what does multiplying by a matrix actually *do*?
+
+The usual answer, "multiply rows by columns and add", is how to compute it. This lesson gives the picture instead: **a matrix is a transformation of an entire space**, and every property that matters (what a layer measures, what information it keeps, what happens when layers are stacked) can be read off that picture.
+
+## The picture
+
+<Recall id="vectors">
+
+A vector is a point and an arrow in a space with one axis per coordinate. In the meaning-is-geometry picture, concepts are directions and similarity is the angle between them. The dot product $\mathbf{a} \cdot \mathbf{b}$ measures how far one vector reaches along another.
+
+</Recall>
+
+A matrix takes every vector in the space and moves it, all at once, in a very constrained way. Picture the whole plane as a sheet of graph paper. A matrix can rotate the sheet, stretch or squash it along some directions, shear it sideways, flip it, or flatten it onto a line. What it can never do is bend it. Three rules always hold:
+
+- the origin stays where it is;
+- straight lines stay straight;
+- evenly spaced grid lines stay evenly spaced.
+
+A transformation that obeys these rules is a <Term id="linear-transformation">linear transformation</Term>, and every such transformation is a matrix. Because the grid moves as a rigid pattern, **you only need to know where the axes go**. Where the unit arrows $\mathbf{e}_1 = (1, 0)$ and $\mathbf{e}_2 = (0, 1)$ land, the <Term id="basis-vectors">basis vectors</Term>, fixes where everything else lands. And the matrix simply lists those landing spots: **column 1 is where $\mathbf{e}_1$ goes, column 2 is where $\mathbf{e}_2$ goes**.
+
+<Figure
+  name="matrix-transform"
+  interactive
+  title="A matrix moves the whole grid, and its columns are where the axes land"
+  caption="The grey grid morphs from the identity into the chosen matrix. The indigo and rose arrows are e₁ and e₂; they finish exactly on the matrix’s first and second columns. The dark arrow is x = (2, 1), built as 2 steps of column 1 plus 1 step of column 2. The shaded unit square becomes a parallelogram whose area is |det|."
+  notice="Choose Project. Both columns land on the same line, so the whole plane collapses onto it: two dimensions of input, one dimension of output."
+/>
+
+<KeyIdea>
+
+A matrix is a transformation of the whole space that keeps grid lines straight, parallel and evenly spaced. Its columns are where the axes land, and every other vector follows as the same mix of columns that it was of axes. A neural network layer is one such transformation of meaning-space, followed by a bend.
+
+</KeyIdea>
+
+## Two ways to read Wx
+
+The product $W\mathbf{x}$ can be read in two ways, and both are worth having.
+
+**The column picture: where does $\mathbf{x}$ go?** A vector is a recipe of axes: $\mathbf{x} = (2, 1)$ means "2 steps along $\mathbf{e}_1$ plus 1 step along $\mathbf{e}_2$". The transformation keeps the recipe but swaps the ingredients, so $W\mathbf{x}$ is "2 steps along column 1 plus 1 step along column 2". This is what the dashed path in the figure shows.
+
+**The row picture: what does the matrix measure?** Each output coordinate is a dot product of $\mathbf{x}$ with one *row* of $W$:
+
+$$
+(W\mathbf{x})_i = \mathbf{w}_i \cdot \mathbf{x}
+$$
+
+From the vectors lesson, a dot product measures alignment. So each row is a **direction the matrix listens for**, and each output coordinate says how strongly the input points that way. This is the reading that matters most for neural networks: <Preview id="forward-pass">a layer of neurons is exactly a matrix whose rows are the neurons' weight vectors</Preview>.
+
+<Example title="the same product, read both ways">
+
+Take the "worked example" matrix from the figure and $\mathbf{x} = (2, 1)$:
+
+$$
+W = \begin{pmatrix} 2 & -1 \\ 1 & 1 \end{pmatrix}
+$$
+
+- **Columns.** Column 1 is $(2, 1)$ and column 2 is $(-1, 1)$. So $W\mathbf{x} = 2 \cdot (2, 1) + 1 \cdot (-1, 1) = (4 - 1,\ 2 + 1) = (3, 3)$.
+- **Rows.** Row 1 is $(2, -1)$: $(2, -1) \cdot (2, 1) = 4 - 1 = 3$. Row 2 is $(1, 1)$: $(1, 1) \cdot (2, 1) = 2 + 1 = 3$. Again $(3, 3)$.
+
+The same four multiplications and two additions, grouped differently. The determinant, $2 \times 1 - (-1) \times 1 = 3$, says every area in the plane is tripled.
+
+</Example>
+
+Matrices need not be square. An $m \times n$ matrix has $n$ columns (one per input axis) and $m$ rows (one per output coordinate), so it maps an $n$-dimensional space into an $m$-dimensional one. Computing $W\mathbf{x}$ takes $m \times n$ multiply-adds, one per entry. A 4,096 × 4,096 layer therefore does about 16.8 million multiply-adds for every vector that passes through it.
+
+## Chaining transformations: multiplication
+
+Apply $B$, then apply $A$ to the result. The combined effect is again a linear transformation (the grid is still straight, parallel and evenly spaced), so it is again a matrix. That matrix is the product $AB$, and this is what <Term id="matrix-multiplication">matrix multiplication</Term> *is*: composition of transformations. Each entry of $AB$ is the dot product of a row of $A$ with a column of $B$, which is just the row picture applied to each of $B$'s columns: "where do $B$'s landing spots land under $A$?"
+
+Two facts follow directly from the picture.
+
+**Order matters.** Take $A$ = "stretch the x-axis by 2" and $B$ = "rotate 90° anticlockwise":
+
+$$
+A = \begin{pmatrix} 2 & 0 \\ 0 & 1 \end{pmatrix}, \quad
+B = \begin{pmatrix} 0 & -1 \\ 1 & 0 \end{pmatrix}, \quad
+AB = \begin{pmatrix} 0 & -2 \\ 1 & 0 \end{pmatrix}, \quad
+BA = \begin{pmatrix} 0 & -1 \\ 2 & 0 \end{pmatrix}.
+$$
+
+Rotate-then-stretch ($AB$) sends $\mathbf{e}_1$ to $(0, 1)$: the rotation turns it upright and the x-stretch leaves it alone. Stretch-then-rotate ($BA$) sends it to $(0, 2)$. Note the reading order: $AB\mathbf{x}$ applies $B$ first, because $B$ is next to $\mathbf{x}$.
+
+**A chain of matrices is still just one matrix.** However many linear transformations you stack, the result is a single transformation with straight, evenly spaced grid lines. Ten matrices in a row can do nothing that one matrix cannot. That is why neural networks must put a non-linear bend between their matrices, the subject of the neuron and forward-pass lessons.
+
+## Rank: what survives the transformation
+
+Some transformations lose information. Choose *Project* in the figure: the matrix
+
+$$
+P = \begin{pmatrix} 0.5 & 0.5 \\ 0.5 & 0.5 \end{pmatrix}
+$$
+
+sends both axes to the same point $(0.5, 0.5)$, so the entire plane is flattened onto the diagonal line. This is a <Term id="projection">projection</Term>, like casting a shadow. Try two inputs: $P(3, 1) = (2, 2)$ and $P(1, 3) = (2, 2)$. Different inputs, identical outputs. They differed only along $(1, -1)$, the direction that $P$ crushes to zero, and once crushed, that difference is gone for good. No later step can tell them apart, so $P$ cannot be undone.
+
+The <Term id="rank">rank</Term> of a matrix is the number of independent directions its output can span: the dimension of what survives. $P$ has rank 1. The worked-example matrix has rank 2, keeps the plane a plane and can be undone. In two dimensions the determinant is the quick test: it is the area scale factor, and it is zero exactly when the plane is flattened. Rank carries the idea to any size. A matrix that maps 4,096 dimensions into 1,024 has rank at most 1,024; at least 3,072 input directions are lost.
+
+Losing directions is not always bad. It is how a model *chooses* what to ignore. A layer that maps to fewer dimensions is forced to keep the directions that matter for the task and discard the rest, a deliberate compression.
+
+## Reason with it
+
+**Why can a fine-tune of a huge model be stored in a small file?** Fine-tuning changes each weight matrix $W$ by some update $\Delta W$. If the change only needs to act along a few directions, $\Delta W$ has low rank, and a rank-$r$ matrix can be written as a product of a tall thin matrix and a short wide one. For a 4,096 × 4,096 matrix, a full update has about 16.8 million numbers. A rank-8 update, written as a 4,096 × 8 matrix times an 8 × 4,096 matrix, has $2 \times 4{,}096 \times 8 = 65{,}536$: 256 times fewer. This is the idea behind LoRA (low-rank adaptation), and it works because useful adjustments to a model often do live in few directions.
+
+**Why can't stacking linear layers make a network smarter?** Each layer is a transformation that keeps the grid straight, and chaining such transformations gives another one. The product $W_3W_2W_1$ is a single matrix, so the stack can only do what one matrix can: rotate, stretch, shear, flip and flatten. Anything that needs curved boundaries, like telling apart points on opposite corners, needs something that is not a matrix. <Preview id="forward-pass">Adding a fold between the matrices</Preview> is what breaks the collapse.
+
+**What does it mean when a layer's output is "the same" for two different inputs?** In the row picture, the two inputs gave identical dot products with every row. In the column picture, they differ only along directions the matrix sends to zero. Either way, the difference lies along a crushed direction, and everything downstream is blind to it. If a model confuses two things it should distinguish, some layer has flattened the direction that separated them.
+
+## Where this picture breaks
+
+- **Two dimensions hide most of the action.** A real layer maps, say, 4,096 dimensions to 16,384. You can't watch that grid, and a general matrix is not one clean rotation or stretch but a mixture of them in different directions. The rules (straight, parallel, evenly spaced; columns are where axes land; rows are what is measured) are exactly the same.
+- **Real layers add a shift.** A neural network layer computes $W\mathbf{x} + \mathbf{b}$. Adding the bias $\mathbf{b}$ moves the origin, which a matrix alone never does. The combination is called an affine map. It is still straight and evenly spaced, just shifted.
+- **A matrix is also just a table.** The same grid of numbers can store a batch of vectors side by side, one per column, rather than describe a transformation. Multiplying a weight matrix by such a batch transforms every vector in it at once, which is how hardware keeps busy. <Preview id="gpu">Why that suits GPUs so well</Preview> is a Compute topic.
+- **Rank is rarely exact in practice.** Learned matrices are almost never exactly rank-deficient. What matters is *approximate* rank: whether a few directions carry most of the stretching. That is why low-rank tricks lose a little accuracy rather than none.
+
+## Why it matters in the feed
+
+"Matmul" is the word for this operation in hardware and research news. When a chip is marketed on its matrix-multiply throughput, or a paper speeds up training with a better matrix kernel, it is about doing this transformation faster. When you read about LoRA adapters, "low-rank" compression or a model's "hidden size", you are reading about how many directions a matrix keeps. And parameter counts are, to a first approximation, the total number of entries in a model's matrices: a 4,096 × 4,096 matrix alone is 16.8 million of them.
+
+## Recap
+
+- A matrix transforms an entire space at once, keeping the origin fixed and grid lines straight, parallel and evenly spaced. Its columns are where the axes land.
+- Read $W\mathbf{x}$ two ways. Column picture: the same mix of columns as $\mathbf{x}$ was of axes. Row picture: each output is a dot product with a row, the alignment measure from the vectors lesson, so each row is a direction the matrix listens for.
+- Matrix multiplication is composition. Order matters, and any chain of matrices collapses into one.
+- Rank is the number of directions that survive. Flattened directions are lost for good, which can be a failure or a deliberate compression.
+- An $m \times n$ matrix costs $m \times n$ multiply-adds per vector, which is where the compute in neural networks goes.

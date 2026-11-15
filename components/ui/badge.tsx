@@ -2,34 +2,46 @@ import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { brushClass, type BrushColor } from "@/lib/sketch"
 
-const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-  {
-    variants: {
-      variant: {
-        default:
-          "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
-        secondary:
-          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive:
-          "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
-        outline: "text-foreground",
-      },
+/*
+ * Badges are paintbrush strokes with the label inside. The colour follows the
+ * variant, or pass `brush` (an arXiv category or a colour name) to choose one.
+ */
+const badgeVariants = cva("sk-tag sm", {
+  variants: {
+    variant: {
+      default: "",
+      secondary: "",
+      destructive: "",
+      outline: "",
     },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
+  },
+  defaultVariants: {
+    variant: "default",
+  },
+})
+
+const VARIANT_COLOR: Record<string, BrushColor> = {
+  default: "yellow",
+  secondary: "blue",
+  destructive: "pink",
+  outline: "green",
+}
 
 export interface BadgeProps
-  extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+  extends React.HTMLAttributes<HTMLSpanElement>,
+    VariantProps<typeof badgeVariants> {
+  brush?: string
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, brush, children, ...props }: BadgeProps) {
+  const key = brush ?? VARIANT_COLOR[variant ?? "default"]
+  const seed = typeof children === "string" ? children : key
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <span className={cn(badgeVariants({ variant }), brushClass(key, seed), className)} {...props}>
+      {children}
+    </span>
   )
 }
 

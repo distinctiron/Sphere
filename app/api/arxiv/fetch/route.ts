@@ -3,7 +3,9 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { fetchPapersFromArxiv } from "@/lib/arxiv";
 import { scoreNovelty } from "@/lib/llm";
+import { recordUsage } from "@/lib/billing/usage";
 import { PaperStatus } from "@prisma/client";
+import { isScheduledFetchActive } from "@/lib/jobs/status";
 
 /**
  * Score a paper in the background (non-blocking)
@@ -16,7 +18,9 @@ async function scorePaperInBackground(
   categories: string[]
 ) {
   try {
-    const scoreResult = await scoreNovelty(title, abstract, authors, categories);
+    const scoreResult = await scoreNovelty(title, abstract, authors, categories, (usage) =>
+      void recordUsage({ feature: "novelty-score", billing: "PLATFORM", usage, paperId })
+    );
     
     await db.paper.update({
       where: { id: paperId },
@@ -37,6 +41,10 @@ export const runtime = "nodejs";
  * POST /api/arxiv/fetch
  * Fetch new papers from arXiv and store them in the database
  * Called after user login to sync papers
+ *
+ * When the scheduled pipeline (Epic 6) is active, papers are already fetched,
+ * scored and indexed in the background, so this only reports how many new
+ * pre-processed papers are waiting. Otherwise it falls back to fetching now.
  */
 export async function POST() {
   try {
@@ -58,6 +66,16 @@ export async function POST() {
       return NextResponse.json(
         { error: "User not found" },
         { status: 404 }
+      );
+    }
+
+    if (await isScheduledFetchActive()) {
+      const newPapers = await db.paper.count({
+        where: user.newPapersSince ? { createdAt: { gt: user.newPapersSince } } : {},
+      });
+      return NextResponse.json(
+        { message: "Papers are pre-processed by the scheduled job", scheduled: true, newPapers },
+        { status: 200 }
       );
     }
 

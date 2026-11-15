@@ -12,18 +12,24 @@ datasource db {
 
 // NextAuth.js required models
 model User {
-  id                 String           @id @default(cuid())
+  id                 String               @id @default(cuid())
   name               String?
-  email              String           @unique
+  email              String               @unique
   emailVerified      DateTime?
   image              String?
   password           String? // For credentials provider
   accounts           Account[]
   sessions           Session[]
-  lastFetchTimestamp DateTime? // Last time user fetched papers from arXiv
+  lastFetchTimestamp DateTime? // Last time user fetched papers from arXiv (set on every login)
+  newPapersSince     DateTime?            @map("new_papers_since") // Previous lastFetchTimestamp: dashboard shows papers created after this
   paperStates        UserPaperState[]
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  storyStates        UserStoryState[]
+  lessonProgress     UserLessonProgress[]
+  paymentPlan        PaymentPlan?
+  transactions       Transaction[]
+  usageEvents        UsageEvent[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 }
 
 model Account {
@@ -66,24 +72,77 @@ model VerificationToken {
 
 // Papers from arXiv
 model Paper {
-  id              String           @id @default(cuid())
-  arxivId         String           @unique @map("arxiv_id")
-  title           String
-  authors         Json // Array of author objects with name field
-  abstract        String
-  publicationDate DateTime         @map("publication_date")
-  updatedDate     DateTime         @map("updated_date")
-  categories      Json // Array of category strings
-  pdfUrl          String           @map("pdf_url")
-  htmlUrl         String           @map("html_url")
-  noveltyScore    Float?           @map("novelty_score")
-  noveltySummary  String?          @map("novelty_summary")
-  userStates      UserPaperState[]
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id                   String           @id @default(cuid())
+  arxivId              String           @unique @map("arxiv_id")
+  title                String
+  authors              Json // Array of author objects with name field
+  abstract             String
+  publicationDate      DateTime         @map("publication_date")
+  updatedDate          DateTime         @map("updated_date")
+  categories           Json // Array of category strings
+  pdfUrl               String           @map("pdf_url")
+  htmlUrl              String           @map("html_url")
+  noveltyScore         Float?           @map("novelty_score")
+  noveltySummary       String?          @map("novelty_summary")
+  // Scheduled novelty scoring bookkeeping (Epic 6)
+  scoringAttempts      Int              @default(0) @map("scoring_attempts")
+  lastScoringAttemptAt DateTime?        @map("last_scoring_attempt_at")
+  scoringError         String?          @map("scoring_error")
+  // RAG indexing bookkeeping (Epic 7)
+  ragStatus            RagStatus        @default(PENDING) @map("rag_status")
+  ragContentHash       String?          @map("rag_content_hash") // sha256 of extracted text; detects content changes
+  ragAttempts          Int              @default(0) @map("rag_attempts")
+  ragError             String?          @map("rag_error")
+  ragIndexedAt         DateTime?        @map("rag_indexed_at")
+  userStates           UserPaperState[]
+  chunks               PaperChunk[]
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
 
   @@index([arxivId])
+  @@index([createdAt])
+  @@index([noveltyScore])
+  @@index([ragStatus])
   @@map("papers")
+}
+
+enum RagStatus {
+  PENDING // Not indexed yet
+  CHUNKED // Chunks stored, some embeddings missing (embedding API failed)
+  READY // All chunks embedded
+  FAILED // Last attempt failed; retried by the rag-indexing job
+  NO_CONTENT // No extractable content
+
+  @@map("rag_status")
+}
+
+// A retrieval unit of a paper's full text (Epic 7 - RAG)
+model PaperChunk {
+  id             String   @id @default(cuid())
+  paperId        String   @map("paper_id")
+  content        String
+  contentHash    String   @map("content_hash") // Lets re-indexing reuse embeddings of unchanged chunks
+  sectionType    String   @map("section_type") // abstract | introduction | methods | results | discussion | conclusion | other
+  sectionTitle   String?  @map("section_title")
+  anchorId       String?  @map("anchor_id") // DOM id in the arXiv HTML (e.g. "S3.p2") used by clickable citations
+  position       Int // Order of the chunk within the whole paper
+  chunkIndex     Int      @map("chunk_index") // Order of the chunk within its section
+  startPosition  Int      @map("start_position") // Character offsets into the extracted plain text
+  endPosition    Int      @map("end_position")
+  tokenCount     Int      @map("token_count")
+  // Float32 vector (little-endian). Similarity search is scoped to one paper, so
+  // brute-force cosine in lib/rag/vector-search.ts is used instead of a vector extension.
+  embedding      Bytes?
+  embeddingModel String?  @map("embedding_model")
+  metadata       Json?
+  paper          Paper    @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([paperId, position])
+  @@index([paperId])
+  @@index([sectionType])
+  @@map("paper_chunks")
 }
 
 // User-Paper state relationship
@@ -112,4 +171,273 @@ enum PaperStatus {
   BEING_PROCESSED
 
   @@map("paper_status")
+}
+
+// Payment and quota tracking
+// Billing (Epic 5). All money is in euros.
+// - Wallet balances are stored in micro-euros (1 EUR = 1,000,000) so that
+//   per-call inference costs (fractions of a cent) are exact integers.
+// - Stripe amounts (top-ups, invoices) are stored in cents, as Stripe reports them.
+// The billing tier is derived, not stored: an active subscription → SUBSCRIPTION;
+// otherwise any completed top-up → PAY_AS_YOU_GO; otherwise FREE (lib/billing/account.ts).
+model PaymentPlan {
+  id                   String    @id @default(cuid())
+  userId               String    @unique @map("user_id")
+  /// Prepaid wallet balance in micro-euros; may dip slightly below zero after the last call
+  balanceMicros        BigInt    @default(0) @map("balance_micros")
+  /// Sum of all completed top-ups in micro-euros (> 0 means the user is on pay-as-you-go)
+  totalToppedUpMicros  BigInt    @default(0) @map("total_topped_up_micros")
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  stripeSubscriptionId String?   @unique @map("stripe_subscription_id")
+  /// Stripe subscription status: active, trialing, past_due, canceled, unpaid, incomplete, ...
+  subscriptionStatus   String?   @map("subscription_status")
+  currentPeriodStart   DateTime? @map("current_period_start")
+  currentPeriodEnd     DateTime? @map("current_period_end")
+  cancelAtPeriodEnd    Boolean   @default(false) @map("cancel_at_period_end")
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@map("payment_plans")
+}
+
+model Transaction {
+  id                      String            @id @default(cuid())
+  userId                  String            @map("user_id")
+  transactionType         TransactionType   @map("transaction_type")
+  /// Amount paid in cents
+  amountCents             Int               @map("amount_cents")
+  currency                String            @default("eur")
+  status                  TransactionStatus @default(PENDING)
+  stripeCheckoutSessionId String?           @unique @map("stripe_checkout_session_id")
+  stripeInvoiceId         String?           @unique @map("stripe_invoice_id")
+  stripePaymentIntentId   String?           @map("stripe_payment_intent_id")
+  stripeSubscriptionId    String?           @map("stripe_subscription_id")
+  user                    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @default(now()) @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+enum TransactionType {
+  WALLET_TOP_UP
+  SUBSCRIPTION_PAYMENT
+
+  @@map("transaction_type")
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+
+  @@map("transaction_status")
+}
+
+/// One metered model call. Real cost is always recorded; what the user pays
+/// depends on `billing` (WALLET: 2× cost from the wallet; SUBSCRIPTION and
+/// PLATFORM: nothing). Platform rows (userId null) are shared background work.
+model UsageEvent {
+  id                String       @id @default(cuid())
+  userId            String?      @map("user_id")
+  /// paper-chat | explain | tutor | novelty-score | news-summary | story-article
+  feature           String
+  billing           UsageBilling
+  provider          String
+  model             String
+  inputTokens       Int          @map("input_tokens")
+  outputTokens      Int          @map("output_tokens")
+  cachedInputTokens Int          @default(0) @map("cached_input_tokens")
+  cacheWriteTokens  Int          @default(0) @map("cache_write_tokens")
+  /// Real inference cost in micro-euros
+  costMicros        Int          @map("cost_micros")
+  /// Deducted from the wallet in micro-euros (markup × cost for WALLET, else 0)
+  chargedMicros     Int          @default(0) @map("charged_micros")
+  paperId           String?      @map("paper_id")
+  user              User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@index([billing, createdAt])
+  @@map("usage_events")
+}
+
+enum UsageBilling {
+  WALLET
+  SUBSCRIPTION
+  PLATFORM
+
+  @@map("usage_billing")
+}
+
+// Scheduled job execution history (Epic 6)
+model JobRun {
+  id             String    @id @default(cuid())
+  jobName        String    @map("job_name")
+  status         JobStatus @default(RUNNING)
+  trigger        String // scheduler | http | cli
+  startedAt      DateTime  @default(now()) @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  durationMs     Int?      @map("duration_ms")
+  itemsProcessed Int       @default(0) @map("items_processed")
+  itemsFailed    Int       @default(0) @map("items_failed")
+  details        Json?
+  error          String?
+
+  @@index([jobName, startedAt])
+  @@map("job_runs")
+}
+
+enum JobStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED // Another run of the same job held the lock
+
+  @@map("job_status")
+}
+
+// Prevents the same job from running concurrently (across processes)
+model JobLock {
+  name        String   @id
+  owner       String
+  lockedUntil DateTime @map("locked_until")
+  acquiredAt  DateTime @default(now()) @map("acquired_at")
+
+  @@map("job_locks")
+}
+
+// ---------------------------------------------------------------------------
+// Breaking news (Epic 8)
+// ---------------------------------------------------------------------------
+
+// One post / article / repo / tweet from a news source
+model NewsItem {
+  id                  String     @id @default(cuid())
+  source              String // hackernews | reddit | github | rss | x
+  externalId          String     @map("external_id") // Stable id within the source
+  url                 String // Link to the item on its platform (or the article itself)
+  canonicalUrl        String     @map("canonical_url") // Normalised target URL; items sharing it are the same story
+  title               String
+  snippet             String?
+  author              String?
+  sourceName          String     @map("source_name") // e.g. "r/LocalLLaMA", "The Verge", "Hacker News"
+  publishedAt         DateTime   @map("published_at")
+  engagement          Int        @default(0) // Points / upvotes / stars
+  comments            Int        @default(0)
+  discussionUrl       String?    @map("discussion_url") // HN / Reddit comments page
+  engagementUpdatedAt DateTime   @default(now()) @map("engagement_updated_at")
+  topic               String     @default("ai")
+  content             String? // Extracted body text used to ground story articles
+  contentFetchedAt    DateTime?  @map("content_fetched_at")
+  embedding           Bytes?
+  embeddingModel      String?    @map("embedding_model")
+  storyId             String?    @map("story_id")
+  story               NewsStory? @relation(fields: [storyId], references: [id], onDelete: SetNull)
+  createdAt           DateTime   @default(now()) @map("created_at")
+  updatedAt           DateTime   @updatedAt @map("updated_at")
+
+  @@unique([source, externalId])
+  @@index([canonicalUrl])
+  @@index([storyId])
+  @@index([topic, storyId])
+  @@index([publishedAt])
+  @@map("news_items")
+}
+
+// A cluster of items about the same event
+model NewsStory {
+  id                  String           @id @default(cuid())
+  topic               String           @default("ai")
+  headline            String
+  summary             String?
+  whyItMatters        String?          @map("why_it_matters")
+  firstSeenAt         DateTime         @map("first_seen_at")
+  lastSeenAt          DateTime         @map("last_seen_at")
+  itemCount           Int              @default(0) @map("item_count")
+  sourceCount         Int              @default(0) @map("source_count") // Distinct platforms
+  heatScore           Float            @default(0) @map("heat_score")
+  isBreaking          Boolean          @default(false) @map("is_breaking")
+  centroid            Bytes?
+  embeddingModel      String?          @map("embedding_model")
+  summarizedItemCount Int              @default(0) @map("summarized_item_count")
+  summaryError        String?          @map("summary_error")
+  summaryAttempts     Int              @default(0) @map("summary_attempts")
+  article             String? // AI-generated markdown article
+  articleCitations    Json?            @map("article_citations")
+  articleItemCount    Int?             @map("article_item_count")
+  articleSourceCount  Int?             @map("article_source_count")
+  articleGeneratedAt  DateTime?        @map("article_generated_at")
+  articleModel        String?          @map("article_model")
+  status              StoryStatus      @default(ACTIVE)
+  items               NewsItem[]
+  userStates          UserStoryState[]
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+
+  @@index([topic, status, heatScore])
+  @@index([topic, status, lastSeenAt])
+  @@map("news_stories")
+}
+
+enum StoryStatus {
+  ACTIVE
+  ARCHIVED
+
+  @@map("story_status")
+}
+
+model UserStoryState {
+  id        String          @id @default(cuid())
+  userId    String          @map("user_id")
+  storyId   String          @map("story_id")
+  status    UserStoryStatus @default(NEW)
+  saved     Boolean         @default(false)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  story     NewsStory       @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+
+  @@unique([userId, storyId])
+  @@index([userId, status])
+  @@map("user_story_states")
+}
+
+enum UserStoryStatus {
+  NEW
+  READ
+  DISMISSED
+
+  @@map("user_story_status")
+}
+
+// ---------------------------------------------------------------------------
+// Learn tab (Epic 9): lessons live in content/learn, only progress is stored
+// ---------------------------------------------------------------------------
+
+model UserLessonProgress {
+  id           String       @id @default(cuid())
+  userId       String       @map("user_id")
+  lessonId     String       @map("lesson_id")
+  status       LessonStatus @default(STARTED)
+  quizCorrect  Int?         @map("quiz_correct")
+  quizTotal    Int?         @map("quiz_total")
+  lastViewedAt DateTime     @default(now()) @map("last_viewed_at")
+  completedAt  DateTime?    @map("completed_at")
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  @@unique([userId, lessonId])
+  @@index([userId, lastViewedAt])
+  @@map("user_lesson_progress")
+}
+
+enum LessonStatus {
+  STARTED
+  COMPLETED
+
+  @@map("lesson_status")
 }

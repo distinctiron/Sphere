@@ -32,8 +32,7 @@ generated: 2026-01-04
 project: Sphere
 project_key: sphere
 tracking_system: file-system
-story_location: "_bmad-output/implementation-artifacts"
-
+story_location: _bmad-output/implementation-artifacts
 development_status:
   epic-1: done
   1-1-project-foundation-setup: done
@@ -42,7 +41,6 @@ development_status:
   1-4-password-reset: done
   1-5-view-account-profile: done
   epic-1-retrospective: optional
-
   epic-2: done
   2-1-papers-database-schema: done
   2-2-arxiv-api-service-paper-fetching-on-login: done
@@ -53,7 +51,6 @@ development_status:
   2-7-add-to-list-action-from-impact-card: done
   2-8-dismiss-paper-from-dashboard: done
   epic-2-retrospective: optional
-
   epic-3: done
   3-1-paper-reader-route-html-rendering: done
   3-2-pdf-fallback-view: done
@@ -62,10 +59,45 @@ development_status:
   3-5-interactive-deep-dive-panel-chat-with-paper: done
   3-6-paper-reading-state-tracking: done
   epic-3-retrospective: optional
-
   epic-4: done
   4-1-dashboard-library-section-drag-and-drop-management: done
   4-2-mark-paper-as-read: done
   4-3-remove-paper-from-library: done
   epic-4-retrospective: optional
-
+  1-6-federated-identity-provider-authentication: done
+  epic-5: in-progress
+  5-1-payment-database-schema-user-quota-tracking: review
+  5-2-free-tier-enforcement-quota-management: review
+  5-3-stripe-integration-pay-as-you-go-purchases: review
+  5-4-subscription-plan-management: review
+  5-5-payment-status-display-quota-ui: review
+  epic-6: in-progress
+  6-1-scheduled-job-infrastructure: review
+  6-2-hourly-arxiv-fetching-cs-physics: review
+  6-3-automated-novelty-scoring-summary-generation: review
+  6-4-user-login-preprocessed-paper-display: review
+  epic-7: in-progress
+  7-1-rag-database-schema-chunk-storage: review
+  7-2-document-chunking-service: review
+  7-3-embedding-generation-vector-storage: review
+  7-4-retrieval-service-similarity-search: review
+  7-5-rag-enhanced-intellisense-integration: review
+  7-6-rag-enhanced-chat-integration-citations: review
+  epic-8: in-progress
+  8-1-news-schema-source-framework-hacker-news-outlet-feeds: review
+  8-2-reddit-github-x-source-adapters: review
+  8-3-story-clustering-heat-ranking: review
+  8-4-llm-story-headlines-summaries: review
+  8-5-news-api-dashboard-news-tab: review
+  8-6-story-article-page-ai-breakdown-sources-bigger-picture: review
+  8-7-news-scheduling-monitoring-retention: review
+  epic-9: in-progress
+  9-1-curriculum-registry-lesson-format-pages: review
+  9-2-progress-tracking-quizzes: review
+  9-3-figure-framework-animations: review
+  9-4-lesson-tutor: review
+  9-5-feed-links-glossary-cross-references: review
+  9-6-path-a-math-neural-networks-llms: review
+  9-7-path-b-compute-silicon-data-centers: review
+  9-8-path-c-building-agents-harness-engineering: review
+  9-9-path-d-ai-economy-geopolitics: review

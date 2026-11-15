@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getSessionUserId } from "@/lib/news/session";
+import { aiAccessDenied, authorizeAiUsage } from "@/lib/billing/account";
+import { meteredSseResponse } from "@/lib/billing/metered-stream";
+import { getSelectionContext } from "@/lib/rag/context";
+import { formatSourcesForPrompt } from "@/lib/rag/query";
 
 export const runtime = "nodejs";
 
@@ -8,24 +12,30 @@ export const runtime = "nodejs";
  * POST /api/papers/[id]/explain
  * Generate explanation for selected text using LLM
  * Returns streaming response
+ *
+ * Body: { text: string, surroundingText?: string }
+ * RAG (Story 7.5): the passages most relevant to the selection are retrieved
+ * (hybrid semantic + position search) and sent to the LLM as numbered sources.
+ * The first SSE event carries the citations: data: {"citations": [...]}.
+ * Without an index or relevant passages, the explanation uses the selection only.
  */
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Check authentication
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Billing: each explanation is metered; free users / empty wallets get 402
+    const access = await authorizeAiUsage(userId);
+    if (!access.allowed) return aiAccessDenied(access);
 
     // Parse request body
     const body = await request.json();
-    const { text } = body;
+    const { text, surroundingText } = body;
 
     if (!text || typeof text !== "string" || text.trim().length === 0) {
       return NextResponse.json(
@@ -46,48 +56,34 @@ export async function POST(
       );
     }
 
-    // Create a streaming response
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          // Import LLM service dynamically to handle streaming
-          const { explainTextStreaming } = await import("@/lib/llm");
-          
-          // Stream the explanation
-          await explainTextStreaming(
-            text.trim(),
-            {
-              title: paper.title,
-              abstract: paper.abstract,
-            },
-            (chunk: string) => {
-              // Send chunk as SSE format
-              const data = JSON.stringify({ chunk });
-              controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`));
-            }
-          );
+    const selection = text.trim();
+    const paragraph =
+      typeof surroundingText === "string" && surroundingText.trim()
+        ? surroundingText.trim().slice(0, 4000)
+        : undefined;
 
-          // Send completion signal
-          controller.enqueue(new TextEncoder().encode(`data: [DONE]\n\n`));
-          controller.close();
-        } catch (error) {
-          console.error("Error in explanation stream:", error);
-          const errorData = JSON.stringify({ 
-            error: "Explanation unavailable. Try the Deep Dive panel for more help." 
-          });
-          controller.enqueue(new TextEncoder().encode(`data: ${errorData}\n\n`));
-          controller.close();
-        }
-      },
-    });
+    return meteredSseResponse(
+      { userId, feature: "explain", billing: access.billing, paperId: paper.id },
+      "Explanation unavailable. Try the Deep Dive panel for more help.",
+      async ({ send, onUsage }) => {
+        const rag = await getSelectionContext(paper.id, selection, paragraph);
+        send({ citations: rag.citations, ragStatus: rag.status });
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      },
-    });
+        // Import LLM service dynamically to handle streaming
+        const { explainTextStreaming } = await import("@/lib/llm");
+        await explainTextStreaming(
+          selection,
+          {
+            title: paper.title,
+            abstract: paper.abstract,
+            surroundingText: paragraph,
+            sources: rag.citations.length > 0 ? formatSourcesForPrompt(rag.citations) : undefined,
+          },
+          (chunk: string) => send({ chunk }),
+          onUsage
+        );
+      }
+    );
   } catch (error) {
     console.error("Error in explanation route:", error);
     return NextResponse.json(
@@ -96,4 +92,3 @@ export async function POST(
     );
   }
 }
-

@@ -7,14 +7,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Form,
   FormControl,
   FormField,
@@ -23,6 +15,8 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { ring } from "@/lib/sketch";
+import { AuthCard, AuthNotice, HandLink, penMessage } from "@/components/auth/auth-shell";
 
 const resetPasswordSchema = z
   .object({
@@ -127,102 +121,89 @@ export function ResetPasswordForm() {
 
   if (isVerifying) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Reset your password</CardTitle>
-          <CardDescription>Verifying reset link...</CardDescription>
-        </CardHeader>
-      </Card>
+      <AuthCard seed="reset-card" titleId="rp-h" title="Reset your password" underline={260}>
+        <p className="m-0 flex items-center gap-2 font-hand text-[22px] text-pencil" role="status">
+          <svg width={26} height={26} viewBox="0 0 26 26" aria-hidden="true" className="flex-none overflow-visible">
+            <path className="sk-draw sk-loop" strokeWidth={1.6} pathLength={1} d={ring(13, 13, 10, 271, 1.05)} />
+          </svg>
+          Verifying reset link...
+        </p>
+      </AuthCard>
     );
   }
 
   if (tokenError) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Reset your password</CardTitle>
-          <CardDescription>Invalid or expired reset link</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-            {tokenError}
-          </div>
-        </CardContent>
-        <CardFooter>
-          <div className="text-center text-sm text-muted-foreground w-full">
-            <a
-              href="/forgot-password"
-              className="text-primary underline-offset-4 hover:underline"
-            >
-              Request a new reset link
-            </a>
-          </div>
-        </CardFooter>
-      </Card>
+      <AuthCard
+        seed="reset-card"
+        titleId="rp-h"
+        title="Reset your password"
+        underline={260}
+        subtitle="Invalid or expired reset link"
+      >
+        <AuthNotice tone="error" seed="reset-token-error">
+          {tokenError}
+        </AuthNotice>
+        <HandLink href="/forgot-password" className="self-center text-[21px]">
+          Request a new reset link
+        </HandLink>
+      </AuthCard>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Reset your password</CardTitle>
-        <CardDescription>
-          Enter your new password below.
-        </CardDescription>
-      </CardHeader>
+    <AuthCard
+      seed="reset-card"
+      titleId="rp-h"
+      title="Reset your password"
+      underline={260}
+      subtitle="Enter your new password below."
+    >
+      {error && (
+        <AuthNotice tone="error" seed="reset-error">
+          {error}
+        </AuthNotice>
+      )}
+
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                {error}
-              </div>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
+          <FormField
+            control={form.control}
+            name="password"
+            render={({ field }) => (
+              <FormItem className="space-y-0">
+                <FormLabel className="mb-1 block">New Password</FormLabel>
+                <FormControl>
+                  <Input type="password" autoComplete="new-password" {...field} />
+                </FormControl>
+                <FormMessage className={penMessage} />
+              </FormItem>
             )}
+          />
 
-            <FormField
-              control={form.control}
-              name="password"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>New Password</FormLabel>
-                  <FormControl>
-                    <Input type="password" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+          <FormField
+            control={form.control}
+            name="confirmPassword"
+            render={({ field }) => (
+              <FormItem className="space-y-0">
+                <FormLabel className="mb-1 block">Confirm New Password</FormLabel>
+                <FormControl>
+                  <Input type="password" autoComplete="new-password" {...field} />
+                </FormControl>
+                <FormMessage className={penMessage} />
+              </FormItem>
+            )}
+          />
 
-            <FormField
-              control={form.control}
-              name="confirmPassword"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Confirm New Password</FormLabel>
-                  <FormControl>
-                    <Input type="password" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? "Resetting password..." : "Reset password"}
-            </Button>
-            <div className="text-center text-sm text-muted-foreground">
-              <a
-                href="/login"
-                className="text-primary underline-offset-4 hover:underline"
-              >
-                Back to login
-              </a>
-            </div>
-          </CardFooter>
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? "Resetting password..." : "Reset password"}
+          </Button>
         </form>
       </Form>
-    </Card>
+
+      <HandLink href="/login" className="self-center text-[21px]">
+        Back to login
+      </HandLink>
+    </AuthCard>
   );
 }
-
