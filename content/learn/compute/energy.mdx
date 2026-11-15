@@ -1,0 +1,139 @@
+---
+id: energy
+title: "Energy: from the grid to the chip"
+summary: Where a data center's electricity goes, from the substation to the sub-volt supply at each chip, how much energy an answer or a training run takes, and why power, not chips, has become the binding constraint on AI. Every watt that goes in comes out as heat.
+minutes: 11
+model: feeding-the-math
+buildsOn: [data-center, distributed-training]
+related: [inference, buildout, accelerators, unit-economics, sovereign-ai]
+keywords: ["energy consumption", "electricity demand", "power usage effectiveness", "PUE", "data center power", "energy efficiency", "power grid", "energy per query", "gigawatt", "watts per GPU"]
+reviewed: 2026-09-29
+quiz:
+  - question: A facility draws 120 MW from the grid, and its IT equipment uses 100 MW. What is its PUE, and where do the other 20 MW go?
+    options:
+      - 0.83; the IT equipment generates 20 MW
+      - 1.2; mostly to cooling, plus losses in transformers, UPS and distribution
+      - 1.2; to charging batteries that are never used
+      - 20; to lighting
+    answer: 1
+    explanation: PUE is total facility power divided by IT power, 120 ÷ 100 = 1.2. The overhead is mainly cooling (pumps, fans, chillers or cooling towers) plus conversion losses before the racks. Note that PUE does not count the losses inside the servers, such as power supplies and voltage regulators, which is why it can look better than the true share of power reaching the chips.
+  - question: Why do voltage regulators sit right next to a GPU on the board, rather than in the rack's power shelf?
+    options:
+      - For appearance
+      - Because at under 1 V, a 1,000 W chip draws more than 1,000 amps, and resistive losses grow with the square of the current, so the final low-voltage step must happen within millimetres of the chip
+      - Because the chip needs AC power
+      - Because regulators must be cooled by the GPU's fan
+    answer: 1
+    explanation: Power is voltage times current, so the same 1,000 W at 0.8 V means 1,250 A. Losses in a conductor scale as current squared times resistance. Power is therefore carried at the highest practical voltage for as long as possible, and stepped down to the chip's voltage at the last moment, right beside it.
+  - question: A site is capped at 500 MW from the grid. Which change adds the most compute capacity?
+    options:
+      - Cutting PUE from 1.3 to 1.2
+      - Replacing the chips with a generation that does twice the FLOPs per joule
+      - Buying cheaper chips of the same efficiency
+      - Adding more racks of the same chips
+    answer: 1
+    explanation: With power capped, compute = IT watts × FLOPs per joule. Cutting PUE from 1.3 to 1.2 raises IT power from about 385 to 417 MW, about 8% more. Doubling FLOPs per joule doubles the compute from the same watts. Cheaper or additional chips of the same efficiency add nothing once the power is used up. In a power-limited world, performance per watt is the metric.
+  - question: A reasoning model writes a 10,000-token chain of thought before a 500-token answer, on the same hardware and at the same batch size as a model that just writes the 500-token answer. Roughly how does the energy per question compare?
+    options:
+      - About the same, because the model is the same
+      - About 20 times more, because energy per generated token is roughly constant and it generates about 21 times as many
+      - About half, because thinking is cheaper than answering
+      - Impossible to say even roughly
+    answer: 1
+    explanation: Each decode step costs about the same energy per token at a given batch size, whether the token is part of hidden reasoning or the visible answer. 10,500 tokens against 500 is about 21 times the work. Long context also makes each step read a larger KV cache, so if anything the ratio is a little worse.
+---
+
+By 2025 the companies building AI talked less about chips and more about electricity. They were striking deals to restart nuclear reactors, putting gas turbines on building sites and planning campuses that draw as much power as a city. Utilities rewrote their demand forecasts, which had been flat for years. How much energy does AI actually use? Where does it go between the power line and the chip? And why did power, rather than chips, become the thing in short supply?
+
+This lesson follows the last resource in the path's picture. Data has to be fed to the arithmetic, and so does energy. All of that energy has to leave again as heat.
+
+## The picture
+
+<Recall id="data-center">
+
+An AI data center packs chips densely because the fastest links are short. A GB200-class rack draws about 130 kW and needs liquid cooling, and a 1 GW campus holds roughly half a million GPUs. Power, not the building, is usually the hardest part to get.
+
+</Recall>
+
+A chip turns electricity into arithmetic, and in the end into heat: every joule a GPU draws leaves it as heat, and the arithmetic is what happened on the way. How much useful work a joule buys is the chip's efficiency. At peak, an H100 does about 990 TFLOP/s in BF16 for about 700 W, **about 1.4 trillion FLOPs per joule**. Moving data costs energy too: at a few picojoules per bit, streaming HBM at full bandwidth takes very roughly 100 W on its own (estimates vary with the generation), which is part of why memory-bound work is expensive in energy as well as time.
+
+Between the power line and the chip sits a chain of conversions. Each one costs a few percent, and the facility spends more on removing the heat.
+
+<Figure
+  name="power-chain"
+  title="From the grid to the chip"
+  caption="One hundred units of power drawn from the grid, with the losses and overheads that peel off at each stage before about three quarters reach the silicon. Bottom row: the voltage at each stage. Illustrative round numbers for a modern facility."
+  notice="The biggest single slice is cooling, and the steps inside the rack still cost about a tenth of what arrives there. Everything, including the useful part, ends as heat."
+/>
+
+<KeyIdea>
+
+Every watt from the grid ends as heat. The facility is a chain of voltage conversions, each costing a few percent, plus a cooling system that removes all of it. Compute capacity is therefore watts × FLOPs per joule, and when the grid connection is the scarce input, efficiency per watt matters more than the price of a chip.
+
+</KeyIdea>
+
+## From power line to chip
+
+Power travels at high voltage because resistive losses scale with the square of the current, and for a fixed power the current falls as the voltage rises:
+- **Grid to substation.** Transmission lines at hundreds of kilovolts feed the campus substation, which steps down to medium voltage (roughly 10–35 kV) for distribution around the site.
+- **Transformers and UPS.** Transformers near each hall step down to 415 or 480 V. An <Term id="ups">uninterruptible power supply</Term> (UPS) with batteries bridges grid glitches until backup generators start.
+- **Rack power supplies** convert the AC to direct current at about 50 V and send it along busbars to the trays.
+- **Voltage regulators** on each board step down to the chip's supply, below 1 V. A 1,000 W chip at 0.8 V draws **1,250 amps**, so these <Term id="voltage-regulator">voltage regulators</Term> sit within millimetres of the chip. Proposals to distribute 800 V DC through the building aim to cut out some of these conversions and much of the copper.
+
+The facility's overhead is summarised by <Term id="pue">power usage effectiveness</Term> (PUE): total facility power divided by the power delivered to the IT equipment. A PUE of 1.2 means 20% extra, mostly for cooling. The largest cloud operators report fleet averages around 1.1; industry surveys put the average across all data centers nearer 1.5. PUE stops at the rack's input, so losses inside the servers (the last two stages of the figure) are not counted in it.
+
+## How much energy AI uses
+
+Energy per unit of work follows from the same arithmetic as the rest of the path: power × time.
+
+<Example title="one answer, one training run">
+
+**One chat answer.** A 70B-class model is served on an 8-GPU H100 server drawing about 10 kW, or 12 kW with a PUE of 1.2. Batching many users together, it produces a few thousand tokens per second in total, say 5,000. That gives $12{,}000 \text{ W} / 5{,}000 \text{ tokens/s} \approx 2.4$ joules per token. A 500-token answer is then about 1,200 J, or **about 0.3 Wh**: a 10 W LED bulb for two minutes. Figures that major providers published in 2025 for a typical (median or average) text prompt were of the same order, roughly 0.2–0.35 Wh. A long reasoning trace of 10,000 tokens costs twenty times as much.
+
+**One training run.** Meta reported about 31 million H100 GPU-hours to train Llama 3 405B. At 700 W per GPU that is about 22 GWh at the GPUs alone. Adding the rest of each server and the facility overhead gives a rough estimate of 30–45 GWh (Meta did not publish a facility-level figure). That is about the annual electricity use of three to four thousand US homes.
+
+</Example>
+
+The per-query number is small; the totals are not, because of volume. The International Energy Agency estimated that data centers used about 415 TWh in 2024, about 1.5% of the world's electricity, and projected roughly a doubling by 2030, with AI the largest driver. In the United States, data centers used about 4.4% of electricity in 2023, with projections of 7–12% by 2028. These are estimates with wide ranges, and they depend on how fast the build-out continues.
+
+## Why power became the binding constraint
+
+<Recall id="distributed-training">
+
+Training is synchronous: a step cannot finish until every GPU finishes, and the traffic between GPUs needs the fast, short links of one tightly coupled cluster.
+
+</Recall>
+
+So a training cluster's power, tens or hundreds of megawatts, has to be delivered to one site. Compare the lead times:
+- A large GPU order ships in months.
+- A data-center building takes one to two years.
+- A new high-voltage grid connection or power plant takes years. In the United States the <Term id="interconnection-queue">interconnection queue</Term> held about 2,600 GW of proposed projects at the end of 2023, with typical waits of around five years, and large transformers have had lead times of two to four years.
+
+When one input takes five years and the others take one, the slow one sets the pace. So builders route around the grid: they choose sites where power already exists, generate power on site (<Term id="behind-the-meter">behind the meter</Term>) with gas turbines or fuel cells, sign long contracts for the output of existing nuclear plants, and offer to cut their load at peak times in exchange for faster connections. The energy sources and the politics of who pays are the subject of <Preview id="buildout">the build-out</Preview>.
+
+## Reason with it
+
+**Why do operators now care more about performance per watt than performance per dollar?** If a site is capped at a fixed number of megawatts, its compute is IT watts × FLOPs per joule. A chip generation that doubles <Term id="performance-per-watt">FLOPs per joule</Term> doubles the site's capacity; a cheaper chip with the same efficiency adds nothing once the power is used up. This is why low-precision formats matter so much for energy: halving the bits roughly doubles the arithmetic per joule as well as per second.
+
+**How much does PUE matter at campus scale?** On a 1 GW connection, a PUE of 1.1 leaves about 910 MW for IT; a PUE of 1.5 leaves about 670 MW. The efficient site runs about 36% more chips from the same grid connection. That is why <Term id="hyperscaler">hyperscalers</Term> invest in liquid cooling and warm-water designs that need little or no chiller energy.
+
+**Why does inference, not training, dominate AI energy in the long run?** A training run is a one-off cost of tens of gigawatt-hours. Serving is paid per token, forever, and grows with users and with longer reasoning. At 0.3 Wh per answer, a billion answers a day is about 300 MWh per day, over 100 GWh a year: a few Llama 3 405B-scale training runs' worth, every year. Every serving trick that makes more tokens per GPU-second (<Preview id="serving-at-scale">serving at scale</Preview>) is also an energy saving.
+
+## Where this picture breaks
+
+- **Per-query estimates vary tenfold or more.** They depend on the model's size, the hardware, how full the batches are, context length and how idle capacity is counted. Treat any single number as an order of magnitude.
+- **Chips rarely run at their rated power.** Utilisation, idle time and headroom mean real draw is below nameplate, while networking, storage and CPUs add to it. Facility-level metering is the reliable number.
+- **Energy is not emissions.** The same kilowatt-hour can come from coal, gas, hydro, solar or nuclear. Emissions depend on the grid mix at that place and hour, which is why siting and contracts matter.
+- **Manufacturing is not counted.** Making chips, HBM and buildings also takes energy, which operating figures leave out.
+
+## Why it matters in the feed
+
+When a company announces a gigawatt campus, you can now convert: about half a million GPUs, roughly 8–9 TWh a year if it runs flat out. When a provider publishes energy per prompt, check whether it includes idle capacity and facility overhead. When a new chip is sold on performance per watt, remember that in a power-limited world that is the number that sets capacity. And when a utility, a turbine maker or a nuclear operator announces a deal with an AI company, it is selling the scarcest input in this path.
+
+## Recap
+
+- Every watt drawn ends as heat. Power passes through a **chain of conversions**, from hundreds of kilovolts to below 1 V, each costing a few percent, and **cooling** is the largest overhead.
+- **PUE** = total facility power ÷ IT power: about 1.1 for the best hyperscale sites, about 1.5 on average. It excludes losses inside the servers.
+- A chat answer takes **roughly 0.3 Wh**; a frontier training run takes **tens of GWh**. Volume turns small numbers into a few percent of national electricity.
+- Power binds because **grid connections take years** while chips take months, the same "whichever runs out first" logic as the roofline. As distributed training showed, a training cluster's power must all arrive at one site.
+- In a power-limited world, **FLOPs per joule** sets capacity: efficiency is capacity.

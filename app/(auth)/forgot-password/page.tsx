@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { AuthShell } from "@/components/auth/auth-shell";
 import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 
 export default async function ForgotPasswordPage() {
@@ -11,11 +12,9 @@ export default async function ForgotPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md">
-        <ForgotPasswordForm />
-      </div>
-    </div>
+    <AuthShell>
+      <ForgotPasswordForm />
+    </AuthShell>
   );
 }
 

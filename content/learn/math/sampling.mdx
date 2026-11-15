@@ -1,0 +1,161 @@
+---
+id: sampling
+title: Sampling & generation
+summary: How a model that outputs probabilities writes text. Generation is a loop that computes a distribution, chooses one token, appends it and feeds the longer text back in. The choice rule (greedy, temperature, top-k, top-p) trades faithfulness for variety, and the loop is why output comes one forward pass per token.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [probability, pretraining, transformer]
+related: [attention, inference, serving-at-scale, model-api]
+keywords: ["sampling", "temperature", "top-p", "top-k", "nucleus sampling", "greedy decoding", "autoregressive", "decoding", "stop token", "self-consistency"]
+quiz:
+  - question: A 500-token answer takes ten times longer to generate than a 500-token prompt takes to read, on the same hardware. What does the sampling loop say about why?
+    options:
+      - Output tokens are longer than input tokens
+      - Each output token must exist before the next can be computed, so the answer needs 500 forward passes in sequence, while the whole prompt is known up front and goes through in parallel
+      - The sampler is slower than the model
+      - Prompts are compressed before reading
+    answer: 1
+    explanation: Generation is autoregressive. Token t+1 depends on token t, which is only known once it has been sampled. Reading the prompt has no such dependency, so all of it can be processed together. This asymmetry is the root of the prefill/decode split in inference.
+  - question: With top-p = 0.9 and the distribution fox 34%, dragon 23%, king 19%, girl 17%, robot 6%, teapot 1%, which tokens can be sampled?
+    options:
+      - Only fox
+      - fox, dragon and king
+      - fox, dragon, king and girl
+      - All six
+    answer: 2
+    explanation: Top-p keeps the smallest set of most-likely tokens whose probabilities add up to at least p. 34 + 23 + 19 = 76% is not enough; adding girl gives 93%, which passes 90%. Robot and teapot are cut, and the four survivors are rescaled to sum to 100%.
+  - question: Why does greedy decoding (always taking the most likely token) often produce loops like “I think that I think that I think that…” in base models?
+    options:
+      - The model runs out of vocabulary
+      - Once a phrase is in the context, attention can copy it, which makes repeating it even more likely; greedy always follows that most-likely path, so the loop reinforces itself
+      - Greedy decoding uses a high temperature
+      - It is a bug in the tokenizer
+    answer: 1
+    explanation: Each chosen token becomes context. Models learn that text often repeats what came before, so a phrase already present raises its own probability. Sampling occasionally takes another branch and escapes; greedy never does.
+  - question: You set temperature to 0 on an API and still occasionally get different answers to the same prompt. Which explanation fits the picture of generation as a chain of choices?
+    options:
+      - Temperature 0 is secretly 1
+      - Tiny numerical differences between runs (for example from different batching on the GPU) can flip a near-tie between two tokens, and since that token becomes context, everything after it can differ
+      - The model learns between calls
+      - The prompt is shuffled on each call
+    answer: 1
+    explanation: At temperature 0 the choice is the top token, but when two tokens have nearly equal logits, rounding differences in parallel arithmetic can change which one is top. One different token changes the context, so the rest of the answer follows a different path.
+---
+
+A trained language model does not output text. For any context it outputs a **probability distribution** over its vocabulary: 34% “ fox”, 23% “ dragon”, and so on for a hundred thousand or more tokens. Something has to turn that distribution into words. That something, a short loop and a rule for choosing, decides whether the same model sounds inventive or robotic, why the same prompt gives different answers, and why answers arrive one token at a time rather than all at once.
+
+## The picture
+
+Generation is a loop:
+1. Feed the whole text so far into the model.
+2. The model returns a distribution over the next token.
+3. **Choose** one token from it.
+4. Append that token to the text, and go back to step 1.
+
+The model is the same at every turn. What changes is the context, which now includes everything the loop has chosen so far. This is <Term id="autoregressive">autoregressive</Term> generation: each output becomes part of the next input.
+
+<Figure
+  name="generation-loop"
+  title="Generation is a loop"
+  caption="Three turns of the loop. The context goes in, the model returns probabilities for the next token, one token is sampled and appended, and the longer context goes back in."
+  notice="In the first turn the sampler picks “dragon” (23%), not the favourite “fox”. Every later distribution is computed from a context that contains that choice, so one draw steers the whole story."
+/>
+
+<KeyIdea>
+
+The model defines a distribution; the decoding rule chooses a path through it. Because every choice is fed back as context, generation is a chain: token t + 1 cannot be computed until token t exists, and an early choice shapes everything after it.
+
+</KeyIdea>
+
+## From the last vector to a distribution
+
+<Recall id="transformer">
+
+A transformer carries one running vector per token, the residual stream, refined by every block. After the last block, the final vector at each position is used to predict the token that comes next.
+
+</Recall>
+
+In meaning-as-geometry terms, the last step is one more alignment. The final vector at the last position is compared, by dot product, with an output vector for every token in the vocabulary. This output table is often the embedding table itself, reused as an <Term id="unembedding">unembedding</Term>. The dot products are the <Term id="logits">logits</Term>: one score per vocabulary entry, highest for the tokens whose direction best matches where the model’s reasoning has pointed the vector.
+
+<Recall id="probability">
+
+Softmax turns logits into a probability distribution. Dividing the logits by a temperature $T$ before softmax rescales every gap: $T$ below 1 sharpens the distribution toward the top token, $T$ above 1 flattens it. The ranking never changes.
+
+</Recall>
+
+<Recall id="pretraining">
+
+Pretraining minimised the average surprise of the true next token. A model trained this way assigns probabilities that match how often each continuation appeared in text like the context, including a long tail of unlikely continuations it must not rule out.
+
+</Recall>
+
+So, for a base model, the distribution is a calibrated belief about **what text like this does next** (post-training reshapes it, as the last lesson of this path shows). It is not a ranking of good answers. Choosing from it is a separate decision.
+
+## Choosing a token
+
+<Term id="greedy-decoding">Greedy decoding</Term> takes the most likely token every time. It is deterministic, and for short factual answers it is often fine. For longer text it tends to be flat and repetitive. A phrase that has already appeared becomes more likely to appear again, since attention can copy from the context. Greedy always follows the most likely path, so once a loop starts it cannot escape.
+
+**Sampling** draws a token at random in proportion to its probability. At temperature 1 this reproduces the model’s beliefs faithfully, and that is its weakness. With a vocabulary of 100,000 tokens, thousands of individually unlikely tokens can together hold a few percent of the probability. Over a 500-token answer, some of those draws will happen. Each odd token becomes context, and the text can drift off course from there.
+
+Two rules cut the tail before sampling. <Term id="top-k-sampling">Top-k</Term> keeps only the $k$ most likely tokens. <Term id="top-p-sampling">Top-p</Term> (nucleus sampling) keeps the smallest set of top tokens whose probabilities add up to at least $p$. Both then rescale the survivors to sum to 1. Top-p adapts to the situation: when the model is confident the set is small, and when many continuations are reasonable it widens.
+
+<Example title="five ways to choose the next word">
+
+After “Once upon a time, a”, a toy model gives logits 2.6, 2.2, 2.0, 1.9, 0.8 and −0.6 for fox, dragon, king, girl, robot and teapot.
+
+| rule | fox | dragon | king | girl | robot | teapot |
+|---|---|---|---|---|---|---|
+| sample, T = 1 | 34% | 23% | 19% | 17% | 5.7% | 1.4% |
+| sample, T = 0.5 | 49% | 22% | 15% | 12% | 1.3% | 0.1% |
+| top-k, k = 3 | 45% | 30% | 25% | cut | cut | cut |
+| top-p, p = 0.9 | 37% | 25% | 20% | 18% | cut | cut |
+| greedy | 100% | | | | | |
+
+For top-p, the running total is 34, 57, 76, then 93%: girl is the token that crosses 90%, so it stays, and robot and teapot go. For top-k, the three survivors, 34 + 23 + 19 = 76%, are rescaled: 34 ÷ 76 ≈ 45%.
+
+</Example>
+
+<Figure
+  name="sampling-lab"
+  interactive
+  title="Write a story one token at a time"
+  caption="A toy model supplies the next-token logits. Choose a decoding rule and a temperature, then step through the loop or run it to the end. Bars show the probabilities used for the next pick; the thin mark is the model’s own probability at temperature 1."
+  notice="Greedy writes the same sentence on every seed. At temperature 1.5 with plain sampling, robots and teapots turn up far more often. Top-p at 0.9 and temperature 1 keeps variety but cuts robot and teapot; raise the temperature and the kept set widens."
+/>
+
+**Stopping** is part of the same loop. The vocabulary contains special tokens such as an end-of-text marker, and a <Term id="stop-token">stop token</Term> is just another candidate the model can choose when the text is complete. Chat models are trained to emit an end-of-turn token when their reply is finished. The loop also stops at a maximum length, or when the output matches a stop sequence set by the developer.
+
+## Why the choice matters
+
+Decoding trades **accuracy against variety**. For code, arithmetic or extracting a fact, low temperature is usually right: there is one good answer, and the most likely continuation is the best guess at it. For brainstorming, dialogue or fiction, some randomness gives variety, and variety is part of quality.
+
+Randomness can also improve accuracy when used deliberately. Sample the same maths problem twenty times and take the most common final answer (“self-consistency”). Wrong reasoning paths tend to scatter across many different wrong answers, while correct paths converge on one, so the majority beats a single greedy run. The same idea, sample many attempts and learn from the good ones, is at the heart of <Preview id="post-training">reinforcing reasoning in post-training</Preview>.
+
+The loop also sets the **cost**. Every output token needs its own full forward pass, run after the previous token is known. A 500-token answer is 500 passes in sequence, and no amount of extra hardware can compute token 400 before token 399 exists. Why this makes generation limited by memory bandwidth rather than arithmetic, and how servers cope, is the subject of <Preview id="inference">inference</Preview>.
+
+## Reason with it
+
+**Why is reading a long prompt fast, but writing a long answer slow?** The prompt is fully known, so all its tokens can go through the model together, as in pretraining, where every position is scored in one pass. The answer does not exist yet, and each token depends on the last. Parallel work on the prompt, sequential work on the answer: the same model, two very different speeds.
+
+**Why can temperature 0 still give different answers on different calls?** At temperature 0 the top token always wins, but GPUs add numbers in orders that can vary with how requests are batched, which shifts logits in the last decimal places. When two tokens are nearly tied, that can flip the winner. The flipped token becomes context, and the rest of the answer follows a different branch. A chain of choices amplifies any single difference.
+
+**Why does a low-probability first word matter more than a low-probability last word?** Because of the loop. A surprising token early on becomes context for every later token, pulling the whole continuation toward text where that token is normal. A surprising final token affects nothing after it. This is also why a small change to the start of a prompt can change a long answer completely.
+
+## Where this picture breaks
+
+- **The toy is a toy.** The figures use a model that looks only at the last token and considers a handful of candidates. A real model conditions on the whole context and scores every vocabulary entry at every step.
+- **Probabilities of tokens are not probabilities of answers.** “Paris” and “the city of Paris” are different token paths to the same answer. Summing over all phrasings is intractable, so the model’s confidence in an *answer* is not directly visible in any single distribution.
+- **Decoding can be constrained.** For <Term id="structured-output">structured output</Term>, systems can mask tokens that would break a required format, such as JSON, at each step. That guarantees the shape of the output, not its correctness, and it is covered with <Preview id="model-api">model APIs</Preview>.
+- **Serving changes the mechanics, not the distribution.** Techniques like <Term id="speculative-decoding">speculative decoding</Term> let a small model draft several tokens that the large model then checks in one pass. Done correctly, they produce exactly the same distribution faster; they do not change what the model would say.
+
+## Why it matters in the feed
+
+When an API exposes *temperature*, *top_p* and *max_tokens*, these are the knobs of this lesson. When a lab reports a benchmark score “at <Term id="pass-at-k">pass@1</Term>” or “with majority voting over 64 samples”, it is saying how many times it ran the loop and how it combined the results. And when a provider advertises “tokens per second”, it is measuring how fast the loop turns, which, as <LessonLink id="inference" /> shows, is set mostly by memory bandwidth.
+
+## Recap
+
+- The model’s last vector is compared with every token’s output vector; the resulting logits become a distribution through the softmax and temperature of the probability lesson.
+- That distribution is, for a base model, a calibrated belief about what text does next, not a ranking of answers.
+- Generation is **autoregressive**: choose one token, append it, feed the text back in. Early choices steer everything after.
+- **Greedy** is deterministic but prone to loops; plain **sampling** is faithful but has a long tail; **top-k** and **top-p** cut the tail before sampling.
+- Every output token costs one full forward pass of the transformer, in sequence, which makes generation slower than reading.

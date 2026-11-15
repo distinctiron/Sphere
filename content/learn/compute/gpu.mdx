@@ -1,0 +1,151 @@
+---
+id: gpu
+title: GPUs and throughput
+summary: Why AI runs on GPUs. A GPU gives up single-thread speed for tens of thousands of simple lanes that run the same instruction together and hide memory waits by switching between threads. Matrix multiplication, which is regular, massively parallel and full of data reuse, is the perfect match.
+minutes: 12
+model: feeding-the-math
+buildsOn: [cpu, forward-pass]
+related: [memory-wall, accelerators, inference, matrices]
+keywords: ["GPU", "GPUs", "graphics processing unit", "CUDA", "streaming multiprocessor", "Nvidia H100", "H100", "parallel computing", "CUDA cores", "data center GPU"]
+quiz:
+  - question: A GPU runs a kernel in which, inside every warp of 32 threads, half the threads take one side of an if-statement and half take the other. What happens to its speed on that code?
+    options:
+      - Nothing, because each thread runs independently
+      - It roughly halves, because the warp executes both sides one after the other with half of its lanes masked off each time
+      - It doubles, because two paths run in parallel
+      - The program crashes
+    answer: 1
+    explanation: The 32 threads of a warp share one instruction stream (SIMT). When they disagree about a branch, the warp runs the first path with the other threads switched off, then the second path. Each lane does useful work only half the time. GPUs pay off on uniform work, which is why matrix math suits them and branchy code does not.
+  - question: An SM keeps its arithmetic busy by switching between resident warps while others wait on memory. If each warp computes for 20 cycles between loads and each load takes 600 cycles, about how many warps must be resident to keep it busy?
+    options:
+      - About 2
+      - About 8
+      - About 31
+      - About 600
+    answer: 2
+    explanation: While one warp waits 600 cycles, others must fill that time with 20-cycle bursts of arithmetic. You need 1 + 600 ÷ 20 = 31 warps. This is why GPUs have huge register files and hold thousands of threads per SM. They buy latency tolerance with parallelism instead of with big caches and prediction.
+  - question: A neural-network layer multiplies a 4,096 × 4,096 weight matrix by the vectors of a batch of tokens. Why does the GPU use its hardware far better with a batch of 2,048 tokens than with a single token?
+    options:
+      - With one token the math is harder
+      - With a batch, each weight fetched from memory is reused for 2,048 tokens and there are millions of independent outputs to spread over the lanes; with one token each weight is used once and there are only 4,096 outputs
+      - GPUs cannot process a single vector
+      - With a batch, the weights are smaller
+    answer: 1
+    explanation: The forward pass turns a batch into a matrix-matrix product. That gives the GPU two things it needs, parallel work (4,096 × 2,048 outputs) and reuse (each weight serves the whole batch). A single token is a matrix-vector product with little parallelism and no reuse of each weight, so the lanes spend most of their time waiting for data.
+  - question: Which task is a poor fit for a GPU, even though it involves a lot of computation?
+    options:
+      - Multiplying large matrices
+      - Rendering the pixels of a video frame
+      - Walking a large tree of possible chess moves, where each step depends on the previous one and branches unpredictably
+      - Applying the same filter to millions of images
+    answer: 2
+    explanation: GPUs need many independent, uniform pieces of work. A chain of dependent, branchy steps runs on one thread at a time, and a GPU thread is slow on its own; it has no big out-of-order core or elaborate branch predictor. That is the kind of work CPUs are built for.
+---
+
+In 2012 a neural network trained on two consumer graphics cards won the ImageNet image-recognition competition by a wide margin. Within a decade, chips descended from those cards were the most sought-after products in the technology industry, and the company that makes most of them became one of the most valuable in the world. Nothing about neural networks was designed with graphics in mind. So why did graphics hardware turn out to be the right machine?
+
+The answer comes from the path's picture, **arithmetic is cheap; getting data to it is what costs**, applied with the opposite priorities from a CPU.
+
+## The picture
+
+<Recall id="cpu">
+
+A CPU core runs one instruction stream as fast as possible. Main memory is about 350 cycles away, so most of the core's silicon goes into caches, branch prediction and out-of-order machinery that hide that distance for a *single* thread. The arithmetic units are a small part of the chip.
+
+</Recall>
+
+A CPU is a **latency** machine: it makes one thread finish as soon as possible. A <Term id="gpu">GPU</Term> is a **throughput** machine: it makes the *total* amount of work per second as large as possible, and accepts that each individual thread is slow. It spends its silicon on thousands of simple arithmetic lanes and the registers to feed them, not on making any one of them clever.
+
+That trade only works for a particular kind of job: one that splits into tens of thousands of independent pieces that all do the same thing. Graphics is such a job (millions of pixels, each shaded by the same program). So, as it turns out, is the core of a neural network.
+
+<Figure
+  name="cpu-vs-gpu-matmul"
+  title="The same matrix multiply, two strategies"
+  caption="Each cell of the output matrix is an independent dot product. The CPU's eight fast cores finish eight cells per step. The GPU's multiprocessors are slower per step, but each one finishes a whole tile of cells at once."
+  notice="The GPU is done while the CPU is still in its first rows, even though each GPU step takes four times as long."
+/>
+
+<KeyIdea>
+
+A GPU does not make memory any closer. It makes waiting harmless: with enough independent work in flight, some of it is always ready to compute while the rest waits for data. That only works when a problem splits into a huge number of identical, independent pieces. Matrix multiplication does.
+
+</KeyIdea>
+
+## Inside a GPU: multiprocessors, warps and lanes
+
+Take an Nvidia H100 (2022, the SXM version), the workhorse of the early-2020s AI build-out. Its structure has three levels:
+- **132 <Term id="streaming-multiprocessor">streaming multiprocessors</Term> (SMs).** An SM is the GPU's unit of replication, roughly analogous to a CPU core, but built very differently.
+- **Four schedulers per SM**, each picking one instruction per cycle from the threads assigned to it.
+- **Lanes.** Each SM has 128 lanes for 32-bit floating-point math, 16,896 across the chip. Marketing calls these "CUDA cores", but a lane is not a core. It has no fetch or decode logic of its own and simply executes whatever instruction its group is given.
+
+Threads are handled in groups of 32 called <Term id="warp">warps</Term>. All 32 threads of a warp execute the same instruction at the same time, each on its own data. This is <Term id="simt">SIMT</Term>, single instruction, multiple threads. It is the idea behind a CPU's SIMD vector units taken much further: one fetch and decode drives 32 lanes. The price is <Term id="warp-divergence">divergence</Term>. If the threads of a warp disagree at an `if`, the warp runs both sides one after the other, masking off the threads that did not take each side.
+
+The memory hierarchy is inverted compared with a CPU. Each SM has a **256 KB register file**, as large as its combined L1 cache and scratchpad memory. The chip has a 50 MB L2 cache and 80 GB of high-bandwidth memory delivering about 3.35 TB/s, some forty times a desktop CPU's DRAM bandwidth. The clock runs at under 2 GHz, less than half a desktop CPU's. Each lane is slow; there are just a great many of them.
+
+## Hiding latency with more work
+
+A GPU's memory is no closer than a CPU's. A load from high-bandwidth memory still takes several hundred nanoseconds, many hundreds of cycles. A CPU hides that for one thread with caches and by running ahead. A GPU hides it with <Term id="latency-hiding">latency hiding</Term>: each SM holds many warps at once (up to 64, which is 2,048 threads), with all their registers resident in that big register file. When a warp stalls on a load, the scheduler issues from another warp on the very next cycle, at no cost.
+
+<Figure
+  name="warp-scheduling"
+  title="Keeping the arithmetic busy by taking turns"
+  caption="Each warp computes briefly, then waits for memory. One warp alone leaves the arithmetic units idle three-quarters of the time. Four staggered warps cover each other's waits completely."
+  notice="In the bottom row there is no gap. No individual warp got faster; there are simply enough of them."
+/>
+
+A useful way to size this is <Term id="littles-law">Little's law</Term>: the data in flight equals bandwidth × latency. To keep 3.35 TB/s flowing with a latency of, say, 500 ns (measured figures vary with the access pattern, but sit in the several-hundred-nanosecond range), about **1.7 MB** of loads must be outstanding at every moment. At 16 bytes per load, that is about a hundred thousand loads, each owned by a waiting thread. An H100 can hold about 270,000 resident threads (132 SMs × 2,048). A desktop CPU at 80 GB/s and 90 ns needs only about 7 KB in flight, around a hundred cache lines, which its out-of-order cores and prefetchers can manage.
+
+So a GPU turns **parallelism into latency tolerance**. It needs a problem with at least tens of thousands of independent threads, or its lanes sit idle.
+
+## Why matrix multiplication fits
+
+<Recall id="forward-pass">
+
+A network layer is a matrix multiply followed by an activation, and a forward pass costs about 2 FLOPs per parameter per token. When a batch of inputs is processed together, the inputs become the columns of a matrix and the layer becomes one matrix-*matrix* product: the same weights applied to the whole batch.
+
+</Recall>
+
+A matrix-matrix product has exactly the three properties a GPU needs:
+1. **Massive parallelism.** Every output number is an independent dot product. There is no chain of dependencies to wait on.
+2. **Regularity.** Every output is computed the same way: multiply, add, repeat. There are no data-dependent branches, so warps never diverge.
+3. **Reuse.** Each weight is used for every token in the batch, and each token's vector for every row of weights. Threads load a tile of each matrix into the SM's scratchpad once, and many threads then reuse it from there. This is the tiling trick from the CPU lesson, done by thousands of threads at once.
+
+<Example title="one layer, one batch">
+
+A layer with a 4,096 × 4,096 weight matrix processes a batch of 2,048 tokens.
+
+- **Work:** $2 \times 4096 \times 4096 \times 2048 \approx 68.7$ GFLOP, spread over $4096 \times 2048 \approx 8.4$ million independent outputs.
+- **CPU:** an 8-core desktop peaks at about 1 TFLOP/s in 32-bit floats, so at least **69 ms**.
+- **GPU:** an H100 does about 67 TFLOP/s with its ordinary lanes. Its specialised matrix units (more in <Preview id="accelerators">accelerators</Preview>) reach about 990 TFLOP/s in 16-bit BF16. That is under **0.1 ms**, roughly a thousand times faster.
+- **Data:** weights, inputs and outputs in BF16 total about 67 MB, which takes 0.02 ms at 3.35 TB/s. Each byte fetched feeds about 1,000 operations, so here the arithmetic, not memory, sets the pace.
+
+</Example>
+
+Now shrink the batch to **one token**. The work drops to 34 MFLOP and only 4,096 outputs, too few to fill 132 SMs. Each weight is used exactly once, so every multiply needs a fresh 2 bytes from memory. The same layer now takes as long as it takes to stream 33.5 MB of weights, about 0.01 ms, while the arithmetic would need about 0.03 µs. The chip is almost entirely waiting. Whether a GPU is fast depends on the *shape* of the work, not just its size.
+
+## Reason with it
+
+**Why is a GPU bad at running a web server or a database?** That work is a stream of small, dissimilar requests full of branches and pointer-chasing. Threads in a warp diverge, each thread is slow on its own, and there is little uniform parallelism to hide latency with. A CPU's big out-of-order cores exist for exactly this kind of work. This is why every GPU server still has CPUs: they run the operating system, prepare data and launch work on the GPUs.
+
+**Why do AI systems work so hard to form batches?** From the one-token example: a batch is what turns a matrix-vector product into a matrix-matrix product, creating both the parallelism that fills the lanes and the reuse that stops them waiting on memory. Training processes millions of tokens per step for this reason, and inference servers group many users' requests together. That is the subject of <Preview id="inference">inference</Preview>.
+
+**Why did graphics chips, and not some other chip, become the AI chip?** Shading pixels is the same shape of work as a matrix multiply: millions of independent outputs, each computed by the same short program over nearby data. GPUs were already optimised for that shape. Once Nvidia's CUDA (2007) made them programmable for general computation, neural-network researchers could use that throughput directly, and the software built up around it since then is a large part of why GPUs remain the default (<Preview id="accelerators">more on that trade-off</Preview>).
+
+## Where this picture breaks
+
+- **The line between CPU and GPU is blurry.** CPUs have SIMD vector units and dozens of cores; GPUs have caches and can run general code. It is a spectrum of how much silicon goes to one fast thread versus many slow ones.
+- **The lanes are no longer the main event.** For AI, most of a modern GPU's arithmetic comes from specialised matrix units rather than the ordinary lanes described here. The throughput logic is the same; the arithmetic per instruction is far larger.
+- **Memory is still the limit for much AI work.** We saw that a single token leaves the chip waiting. Deciding when a workload is limited by arithmetic and when by memory needs a precise tool, the roofline of <Preview id="memory-wall">the memory wall</Preview>.
+- **Big models do not fit on one GPU.** The picture here is a single chip. Real training and serving spread work across thousands of them, which adds a new kind of data movement between chips.
+
+## Why it matters in the feed
+
+When a GPU launch is announced, the spec sheet lists the pieces of this lesson: the number of SMs, peak TFLOP/s at different precisions, memory capacity and memory bandwidth. Read peak TFLOP/s as "what you get if the work is shaped like a big batched matrix multiply", and bandwidth as "what you get otherwise". When analysts talk about the "CUDA moat", they mean the software stack that lets developers use this hardware without writing warp-level code. When a lab reports training on tens of thousands of GPUs, each of those GPUs is running hundreds of thousands of threads doing tiles of matrix multiplies.
+
+## Recap
+
+- A CPU optimises **latency** (one fast thread); a GPU optimises **throughput** (total work per second), with thousands of simple lanes.
+- Lanes run in **warps** of 32 that share one instruction (SIMT). Divergent branches waste lanes.
+- GPUs hide memory latency not with bigger caches but with **more resident work**: when one warp waits, another computes. By Little's law, that needs on the order of 100,000 loads in flight.
+- **Matrix multiplication** fits perfectly: massively parallel, regular and full of reuse. As the forward-pass lesson showed, batching turns a layer into exactly that shape.
+- With one token instead of a batch, even a GPU waits on memory. Arithmetic is cheap; data is what costs.

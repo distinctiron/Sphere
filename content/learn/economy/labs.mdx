@@ -1,0 +1,151 @@
+---
+id: labs
+title: The model labs
+summary: What frontier labs sell, what they spend, and why a lead in model quality is a chokepoint that decays. How API, subscription and enterprise revenue, open versus closed weights, compute partners and funding rounds fit one picture.
+minutes: 11
+model: follow-the-bottleneck
+buildsOn: [value-chain]
+related: [hyperscalers, pretraining, post-training, unit-economics, model-api]
+keywords: ["OpenAI", "Anthropic", "Google DeepMind", "DeepSeek", "Mistral", "open weights", "open-weight model", "frontier lab", "funding round", "valuation"]
+reviewed: 2026-09-29
+quiz:
+  - question: A lab's frontier model costs about three times as much to train as the previous one, and each generation keeps a premium price for about a year. What must happen to its revenue for the lab to fund each new model from its own gross profit?
+    options:
+      - It can stay flat, because older models keep earning
+      - It must grow roughly as fast as training costs, about threefold per generation, because each year's gross profit has to pay for a model three times as expensive as the last
+      - It must grow tenfold per generation
+      - Revenue does not matter because labs are funded by investors
+    answer: 1
+    explanation: On the treadmill, each generation's premium window must pay for the next generation's training. If training costs triple per generation and the window lasts about a year, gross profit must roughly triple each year too. Anything slower must be covered by outside funding, which is why fundraising and revenue growth are watched so closely.
+  - question: Why might a company whose main business is social apps and ads release its best model's weights for free?
+    options:
+      - Open weights cost nothing to train
+      - Making models cheap and widely available lowers the price of an input to its own products and weakens rivals whose business is selling model access; its profits come from the apps, not the model
+      - Regulations require it
+      - Open models always perform better
+    answer: 1
+    explanation: This is commoditising the complement. If the model layer becomes cheap and abundant, value shifts to the layers the company does control, such as distribution and ads, and rivals that sell model access see their premium shrink. The same logic applies to a cloud provider that profits when many people run open models on its infrastructure.
+  - question: An independent lab's model leads on coding by a clear margin today. According to the treadmill picture, what best turns that lead into something that lasts?
+    options:
+      - Raising the API price as high as possible
+      - Using the window to build links that are hard to route around, such as tools embedded in developers' daily workflow, enterprise contracts, and secured compute for the next generation
+      - Publishing the model's weights
+      - Waiting for competitors to catch up before investing
+    answer: 1
+    explanation: A capability lead decays as rivals and open-weight models catch up. The lead lasts only if it is converted into something that decays more slowly, like integration into customers' workflows, contracts, brand and a guaranteed supply of compute. That is why labs build products and agents, not just models.
+  - question: Combining this lesson with the hyperscaler lesson, why are many large investments in labs made by cloud providers and chip suppliers rather than only by financial investors?
+    options:
+      - They are required to by law
+      - A lab's largest cost is compute, so strategic investors can supply capital that returns to them as cloud or chip revenue, while securing a large customer and a place at the frontier
+      - Financial investors are not allowed to invest in AI
+      - Labs prefer investors who know nothing about their costs
+    answer: 1
+    explanation: Much of a lab's spending flows to compute. An investor who sells that compute recovers part of its investment as revenue and locks in demand for its capacity. This is the circular-financing pattern from the hyperscaler lesson. The test is still whether the lab's revenue from end customers grows into its commitments.
+---
+
+A handful of companies train the most capable AI models. Some are losing billions of dollars a year while being valued at hundreds of billions. Chinese labs give away models that come within months, or at most about a year, of the best American ones. A European lab is backed by a Dutch lithography company. What are these firms actually selling, and why does their position look so strong on launch day and so fragile a year later?
+
+This lesson places the labs on the bottleneck map and gives you one picture, a treadmill, to read their funding rounds, pricing moves and open-weight releases.
+
+## The picture
+
+<Recall id="value-chain">
+
+Output in the AI chain is capped by the scarcest link, and margins go to links that are scarce and hard to route around. A shortage that rivals can fix quickly earns only a brief premium; a chokepoint earns a lasting rent.
+
+</Recall>
+
+A lab sits between two very different markets. **Below it** is compute, a chokepoint it mostly rents from hyperscalers, who buy from chip suppliers with high margins. **Above it** are customers who can switch models with a line of code. The lab's own product, **model capability**, is a chokepoint of a special kind: on launch day, nobody can route around the best model for a task. But competitors and open-weight releases match it within months, and then it becomes a commodity.
+
+<Figure
+  name="frontier-treadmill"
+  title="The frontier treadmill"
+  caption="Four model generations a year apart. Each costs about three times more to train than the last (bottom; trend estimates put the yearly growth at roughly 2–3×). The price customers pay for each generation's capability starts high and falls roughly tenfold a year as rivals match it (top, log scale; estimates of that rate vary widely). Illustrative, not data. The shaded wedge is the premium window."
+  notice="The premium window is short compared with the time it takes to pay for training, and each new generation must be funded before the last one has finished earning."
+/>
+
+<KeyIdea>
+
+A <Term id="frontier-lab">frontier lab</Term> holds a **lead in time that decays**. Its business is to earn as much as possible during each premium window, and to convert the lead into links that decay more slowly: distribution, integration into customers' work, enterprise contracts, secured compute and trust. Everything else, from pricing to open weights to funding, follows from how fast its lead decays and how much the next generation costs.
+
+</KeyIdea>
+
+## Who the labs are
+
+It helps to sort labs by what stands behind them, because that decides how they fund the treadmill.
+- **Independent labs**: OpenAI, Anthropic and Mistral, with xAI (tied to Elon Musk's other companies) in between. Their revenue comes from models, so they must raise outside capital and sign compute deals to keep up.
+- **Labs inside large companies**: Google DeepMind (Alphabet), Meta's AI groups, and in China Alibaba's Qwen team and ByteDance. They fund training from existing profits and ship models through products with billions of users.
+- **Chinese labs** such as DeepSeek (backed by a quantitative hedge fund), Moonshot, Zhipu and MiniMax, which mostly release open weights and work under US export controls on advanced chips.
+
+As of mid-2026 the frontier on most benchmarks is held by a few American labs, with the best Chinese open-weight models typically a few months to a year behind. The gap varies by task and moves with each release.
+
+## How labs make money
+
+Labs have four main revenue lines:
+- **API access**, priced per token, sold directly and through the big clouds' model marketplaces. Developers and businesses build products on it.
+- **Consumer subscriptions**, typically around \$20 a month, with premium tiers up to about \$200 for heavy users. ChatGPT reported around 800 million weekly users in late 2025.
+- **Enterprise deals**: seats for employees, custom deployments, and agents for coding and other work. Coding tools have been among the fastest-growing sources of revenue.
+- **Licensing and partnerships**: model access bundled into another company's products, or revenue shares with cloud providers.
+
+Labs often quote <Term id="run-rate-revenue">run-rate revenue</Term>: the latest month's revenue × 12. The leading independent labs reported run-rates that grew several-fold per year through 2025, reaching the order of ten to a few tens of billions of dollars a year for the largest by 2026 (as of mid-2026, from company statements and press reports; these figures are not audited). Their costs grew too. Compute dominates: training the next models, and serving the current ones. Researcher pay is the other large line; in 2025 competition for top researchers pushed a few reported offers into the hundreds of millions of dollars over several years, though such reports are hard to verify.
+
+## Open or closed weights, as strategy
+
+A lab that releases <Term id="open-weights">open weights</Term> lets anyone download and run its model. That gives up per-token revenue on that model. Why do it?
+- **Commoditise the complement.** If your profits come from something that *uses* models, cheap and abundant models help you and hurt rivals who sell model access. This is the classic reason for Meta's early open releases, and for a cloud provider like Alibaba, which earns when people run models on its infrastructure. The strategy is called <Term id="commoditize-the-complement">commoditising the complement</Term>.
+- **Adoption and talent.** Open models spread quickly, become the default for researchers and startups, and help recruit.
+- **Standards and influence.** For Chinese labs working under chip export controls, open releases build global adoption on their architectures and tooling, and signal capability.
+
+Closed weights keep the premium window for the lab alone and let it control how the model is used, a safety argument as well as a commercial one. The strategies are not fixed: OpenAI released an open-weight model in 2025, and Meta was reported in 2025 to be reconsidering openness for its most capable systems.
+
+Open weights also shape everyone else's treadmill. Each strong open release lowers the price floor for that level of capability, which shortens the premium window of every closed model at or below it.
+
+## Compute partners and funding
+
+A lab must pay for training before the model earns anything, so it needs capital years ahead of revenue. That capital increasingly comes from the firms that sell it compute. Microsoft was OpenAI's main early backer and cloud; Amazon and Google have invested billions in Anthropic, which uses their chips and clouds; Nvidia has invested across many labs and neoclouds.
+
+<Recall id="hyperscalers">
+
+Hyperscalers turn capital into compute and must earn it back over the hardware's short economic life. In circular deals, a supplier invests in a customer that buys its products, so the same money appears as investment, contract value and revenue. Only end-customer revenue enters from outside.
+
+</Recall>
+
+For a lab, strategic money is attractive because it arrives with guaranteed compute, but it deepens dependence on the partner that controls the scarcest input. Funding rounds reflect this: OpenAI raised \$40 billion in a round led by SoftBank in 2025 and was valued at around \$500 billion in a share sale later that year; Anthropic raised \$13 billion in September 2025 at a valuation of \$183 billion, and was reported to have raised more at higher valuations since. Valuations at that scale price in the expectation that one or more labs will turn a decaying lead into a durable position.
+
+<Example title="the treadmill in numbers (illustrative)">
+
+A lab trains generation N for **\$1 billion** of compute and expects generation N+1 to cost about **\$3 billion** a year later.
+- Suppose the lab keeps **50%** gross margin on serving generation N at premium prices for about a year.
+- To pay for generation N+1 from its own gross profit, it needs \$3bn ÷ 0.5 = **\$6 billion** of revenue from generation N during that year.
+- The year after, generation N+2 costs about \$9 billion, so revenue must reach about **\$18 billion**.
+
+Revenue has to roughly triple every year just to self-fund the treadmill. Any shortfall must come from investors, which is why each funding round is also a bet on the next year's revenue growth.
+
+</Example>
+
+## Reason with it
+
+**Why must a frontier lab's revenue grow about as fast as its training costs?** From the treadmill: each generation's premium window must pay for a more expensive successor. If training costs triple per generation and the window lasts about a year, gross profit must triple too. Labs whose revenue grows slower need ever-larger outside rounds, and become more dependent on compute partners. Labs inside big companies can bridge the gap from other profits, which is a structural advantage.
+
+**Why would a company give away a model that cost hundreds of millions of dollars to train?** Because its profits sit in a different link. If the model layer is cheap and abundant, value shifts to the layers it controls, such as apps, ads or cloud, and rivals that sell model access lose their premium. An open release is a move on the whole chain, not a donation.
+
+**A lab leads on coding by a clear margin. What would make that lead last?** Not the model alone, which rivals will match. The lead lasts if the lab uses its window to build links that are hard to route around: agents embedded in developers' daily tools, enterprise contracts, feedback from real use that improves the next model, and compute secured for the next generation. This is why labs increasingly ship products and agents, not just models.
+
+## Where this picture breaks
+
+- **Capability is not one-dimensional.** Labs lead on different things (coding, multimodal, cost, safety features), so several can hold premium windows at once in different niches.
+- **The window can lengthen or shorten.** If frontier gains come from things that are hard to copy, such as large reinforcement-learning environments, proprietary data or deployment feedback, windows lengthen. Distillation, training a smaller model on a stronger model's outputs, and open releases shorten them.
+- **Not every lab maximises profit.** Mission-driven structures, safety commitments and national goals shape choices about openness, pricing and release timing.
+- **The numbers are murky.** Private labs' revenue, costs and margins come from their own statements and press reports. In-house labs at large companies do not report separately at all.
+
+## Why it matters in the feed
+
+When a lab announces a funding round, ask who the investor is: a compute supplier recovers part of it as revenue. When a Chinese lab releases a strong open-weight model, read it as a cut in the price floor for that capability, and a shorter window for closed rivals. When a lab cuts API prices or launches a product built around agents, read it as a move to convert a decaying lead into something more durable. And when two labs trade the top spot on a benchmark, remember that the premium goes to whoever holds the lead long enough to earn from it.
+
+## Recap
+
+- Labs sit between a compute chokepoint below and customers who can switch easily above, as in the value-chain picture.
+- A frontier model is a **chokepoint that decays**: premium prices last months, while each new generation costs roughly two to three times more.
+- Revenue comes from **APIs, consumer subscriptions, enterprise deals and licensing**; costs are dominated by compute and talent.
+- **Open weights** are a strategy: they commoditise a complement and lower the price floor for everyone.
+- Labs rely on **compute partners and funding rounds**, which ties them to the circular financing described in the hyperscaler lesson.

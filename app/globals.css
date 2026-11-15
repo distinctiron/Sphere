@@ -2,59 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Sketchbook theme. Paper #fbfaf5 with a blue graph grid, graphite ink #22252e,
+ * muted #5b5f6b and a red pen #d6402b. The shadcn tokens below map onto it so
+ * untouched components still sit on the paper.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem
-  }
-  .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%
+    --background: 50 47% 97%;
+    --foreground: 225 15% 16%;
+    --card: 50 100% 99%;
+    --card-foreground: 225 15% 16%;
+    --popover: 50 100% 99%;
+    --popover-foreground: 225 15% 16%;
+    --primary: 225 15% 16%;
+    --primary-foreground: 50 100% 99%;
+    --secondary: 48 40% 92%;
+    --secondary-foreground: 225 15% 16%;
+    --muted: 48 40% 93%;
+    --muted-foreground: 226 8% 39%;
+    --accent: 48 100% 85%;
+    --accent-foreground: 225 15% 16%;
+    --destructive: 7 67% 50%;
+    --destructive-foreground: 50 100% 99%;
+    --border: 225 15% 16%;
+    --input: 225 15% 16%;
+    --ring: 7 67% 50%;
+    --chart-1: 7 67% 50%;
+    --chart-2: 152 63% 33%;
+    --chart-3: 214 64% 47%;
+    --chart-4: 43 100% 39%;
+    --chart-5: 330 70% 55%;
+    --radius: 0.25rem;
+
+    --sk-paper: #fbfaf5;
+    --sk-sheet: #fffefa;
+    --sk-ink: #22252e;
+    --sk-muted: #5b5f6b;
+    --sk-red: #d6402b;
+    --sk-green: #1f8a57;
+    --sk-amber: #c98d00;
+    --sk-blue: #2b6ec4;
   }
 }
 
@@ -62,12 +50,188 @@
   * {
     @apply border-border;
   }
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--sk-paper);
+    background-image: linear-gradient(rgba(60, 100, 170, 0.075) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(60, 100, 170, 0.075) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: var(--sk-ink);
+    font-family: var(--font-body), system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  a:hover {
+    color: var(--sk-red);
+  }
+  ::selection {
+    background: rgba(255, 212, 59, 0.55);
+    color: inherit;
   }
 }
 
-/* Ensure text selection highlight remains visible */
+/* ---------------------------------------------------------------------------
+ * Sketch kit. React wrappers live in components/sketch; the classes can also
+ * be used directly. Every class is prefixed sk- to stay out of Tailwind's way.
+ * ------------------------------------------------------------------------- */
+@layer components {
+  .sk-hand { font-family: var(--font-hand), cursive; }
+  .sk-mono { font-family: var(--font-code), ui-monospace, monospace; }
+  .sk-serif { font-family: var(--font-serif), Georgia, serif; }
+  .sk-muted { color: var(--sk-muted); }
+  .sk-red { color: var(--sk-red); }
+
+  /* Pencil frames: an absolutely positioned svg with three passes. */
+  .sk-frame { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .sk-frame path { fill: none; stroke: var(--sk-ink); stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; transition: stroke 0.2s ease; }
+  .sk-frame .f1 { stroke-width: 1.8; }
+  .sk-frame .f2 { stroke-width: 1.2; opacity: 0.6; }
+  .sk-frame .f3 { stroke-width: 0.9; opacity: 0.4; }
+  .sk-frame.dash .f1, .sk-frame.dash .f2 { stroke-dasharray: 9 7; }
+  .sk-frame.redline path { stroke: var(--sk-red); }
+  .sk-frame.greenline path { stroke: var(--sk-green); }
+  .sk-frame.faint { opacity: 0.55; }
+  .sk-corner { position: absolute; overflow: visible; pointer-events: none; }
+  .sk-corner.br { right: -14px; bottom: -14px; }
+  .sk-corner.tl { left: -6px; top: -6px; }
+
+  /* Cards with a hatched shadow that appears on hover. */
+  .sk-wrap { position: relative; }
+  .sk-hatch { position: absolute; inset: 8px -8px -8px 8px; background: repeating-linear-gradient(-48deg, rgba(34, 37, 46, 0.55) 0 1px, transparent 1px 5px); opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
+  .sk-card { position: relative; background: var(--sk-sheet); transition: transform 0.25s ease; }
+  .sk-wrap.hover:hover > .sk-hatch { opacity: 0.35; }
+  .sk-wrap.hover:hover > .sk-card { transform: translate(-3px, -3px) rotate(-0.25deg); }
+  .sk-lift { position: relative; }
+
+  /* Strokes that draw themselves (pathLength="1"). */
+  .sk-draw { fill: none; stroke: var(--sk-ink); stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: skdraw 0.9s cubic-bezier(0.5, 0.1, 0.3, 1) forwards; }
+  .sk-draw.p2 { stroke-width: 1.3; opacity: 0.6; }
+  .sk-draw.red { stroke: var(--sk-red); }
+  .sk-draw.green { stroke: var(--sk-green); }
+  .sk-draw.amber { stroke: var(--sk-amber); }
+  .sk-draw.thin { stroke-width: 1.5; }
+  .sk-draw.sh { stroke-width: 1; opacity: 0.75; animation-duration: 1.4s; animation-timing-function: linear; }
+  .sk-draw.sh2 { stroke-width: 0.8; opacity: 0.45; animation-duration: 1.4s; animation-timing-function: linear; }
+  .sk-draw.still { animation: none; stroke-dashoffset: 0; }
+  .sk-loop { animation: skdraw 1.3s ease-in-out infinite; }
+  .sk-ink { fill: none; stroke: var(--sk-ink); stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Paintbrush strokes: .sk-bs / .sk-tag + one of the .sk-t-* classes paints a stroke behind the content. */
+  .sk-bs, .sk-tag { position: relative; isolation: isolate; display: inline-block; }
+  .sk-bs::before, .sk-tag::before { content: ""; position: absolute; z-index: -1; left: -6px; right: -12px; top: -4px; bottom: -4px; background-repeat: no-repeat; background-size: 100% 100%; animation: skpaint 0.7s cubic-bezier(0.6, 0.05, 0.3, 1) both; animation-delay: inherit; }
+  .sk-bs.still::before, .sk-tag.still::before { animation: none; }
+  .sk-bs.wide::before { left: -10px; right: -16px; top: -2px; bottom: -6px; }
+  .sk-tag { padding: 7px 22px 7px 16px; font-family: var(--font-code), monospace; font-size: 12.5px; font-weight: 700; color: #1b1d24; line-height: 1.3; white-space: nowrap; }
+  .sk-tag.sm { padding: 5px 16px 5px 12px; font-size: 11.5px; }
+  .sk-tag.xs { padding: 3px 12px 3px 9px; font-size: 10.5px; }
+  .sk-t-cl0::before { background-image: url(/brushes/brush-cl-0.svg); }
+  .sk-t-cl1::before { background-image: url(/brushes/brush-cl-1.svg); }
+  .sk-t-lg0::before { background-image: url(/brushes/brush-lg-0.svg); }
+  .sk-t-lg1::before { background-image: url(/brushes/brush-lg-1.svg); }
+  .sk-t-cv0::before { background-image: url(/brushes/brush-cv-0.svg); }
+  .sk-t-cv1::before { background-image: url(/brushes/brush-cv-1.svg); }
+  .sk-t-qp0::before { background-image: url(/brushes/brush-qp-0.svg); }
+  .sk-t-qp1::before { background-image: url(/brushes/brush-qp-1.svg); }
+  .sk-t-sm0::before { background-image: url(/brushes/brush-sm-0.svg); }
+  .sk-t-sm1::before { background-image: url(/brushes/brush-sm-1.svg); }
+
+  /* Buttons: pencil frame + a yellow brush that sweeps in on hover (always painted on primary). */
+  .sk-btn { position: relative; isolation: isolate; cursor: pointer; background: var(--sk-sheet); color: var(--sk-ink); border: 0; min-height: 46px; padding: 0 20px; font-family: var(--font-hand), cursive; font-size: 24px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none; white-space: nowrap; }
+  .sk-btn:hover { color: var(--sk-ink); }
+  .sk-btn.small { font-size: 20px; min-height: 40px; padding: 0 14px; }
+  .sk-btn.large { font-size: 28px; min-height: 54px; padding: 0 28px; }
+  .sk-btn.ghost { background: transparent; }
+  .sk-btn.danger { color: var(--sk-red); }
+  .sk-btn:disabled, .sk-btn[aria-disabled="true"] { cursor: not-allowed; opacity: 0.5; }
+  .sk-btn .lbl { position: relative; display: inline-flex; align-items: center; gap: 8px; }
+  .sk-btn.primary .sk-bsw { clip-path: inset(0 0 0 0); }
+  /* z-index -1: inside the button's isolated stacking context the brush paints above its background but below the label */
+  .sk-bsw { position: absolute; z-index: -1; left: 2px; right: 0; top: 5px; bottom: 3px; background: url(/brushes/brush-btn-0.svg) no-repeat; background-size: 100% 100%; clip-path: inset(0 100% 0 0); transition: clip-path 0.45s cubic-bezier(0.6, 0.05, 0.3, 1); pointer-events: none; }
+  .sk-btn:not(:disabled):hover .sk-bsw, .sk-btn:focus-visible .sk-bsw { clip-path: inset(0 0 0 0); }
+  .sk-btn:focus-visible, .sk-chip:focus-visible, .sk-icon:focus-visible, .sk-seg:focus-visible { outline: 2px dashed var(--sk-red); outline-offset: 3px; }
+  .sk-icon { cursor: pointer; width: 44px; height: 44px; border: 0; background: none; color: var(--sk-ink); display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; position: relative; flex: none; }
+  .sk-icon:hover { background: rgba(255, 212, 59, 0.5); color: var(--sk-ink); }
+  .sk-icon:disabled { cursor: not-allowed; opacity: 0.45; background: none; }
+
+  /* Segmented controls: the selected option gets a blue brush. */
+  .sk-segs { display: inline-flex; flex-wrap: wrap; }
+  .sk-seg { position: relative; isolation: isolate; cursor: pointer; border: 0; background: none; min-height: 44px; padding: 0 16px; font-family: var(--font-hand), cursive; font-size: 22px; font-weight: 700; color: var(--sk-muted); display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+  .sk-seg:hover { color: var(--sk-ink); }
+  .sk-seg .lbl { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+  .sk-seg.on, .sk-seg[aria-current="page"], .sk-seg[aria-pressed="true"], .sk-seg[aria-selected="true"] { color: #1b1d24; }
+  .sk-bseg { display: none; position: absolute; left: 0; right: -4px; top: 6px; bottom: 5px; background: url(/brushes/brush-seg-0.svg) no-repeat; background-size: 100% 100%; pointer-events: none; }
+  .sk-seg.on .sk-bseg, .sk-seg[aria-current="page"] .sk-bseg, .sk-seg[aria-pressed="true"] .sk-bseg, .sk-seg[aria-selected="true"] .sk-bseg { display: block; animation: skpaint 0.5s cubic-bezier(0.6, 0.05, 0.3, 1) both; }
+  .sk-chip { font: inherit; cursor: pointer; background: none; border: 0; min-height: 44px; padding: 0 6px; display: inline-flex; align-items: center; }
+  .sk-crossed { position: relative; display: inline-block; padding: 6px 12px; font-family: var(--font-code), monospace; font-size: 12.5px; font-weight: 700; color: var(--sk-muted); text-decoration: line-through; text-decoration-color: var(--sk-red); text-decoration-thickness: 2px; }
+
+  /* Form controls: .sk-field wraps the control and a SketchFrame. */
+  .sk-lab { display: block; font-family: var(--font-hand), cursive; font-size: 22px; font-weight: 700; line-height: 1.2; margin-bottom: 4px; }
+  .sk-help { font-size: 13px; color: var(--sk-muted); margin: 2px 0 6px; }
+  .sk-field { position: relative; display: block; background: var(--sk-sheet); }
+  .sk-inp { position: relative; font: inherit; font-size: 15px; border: 0; background: transparent; min-height: 46px; padding: 0 14px; width: 100%; box-sizing: border-box; color: var(--sk-ink); }
+  .sk-inp::placeholder { color: #8a8d96; }
+  .sk-inp:focus { outline: none; }
+  .sk-inp:disabled { cursor: not-allowed; opacity: 0.6; }
+  .sk-field:focus-within .sk-frame path { stroke: var(--sk-red); }
+  .sk-field.invalid .sk-frame path { stroke: var(--sk-red); }
+  textarea.sk-inp { padding: 12px 14px; resize: vertical; min-height: 96px; line-height: 1.5; }
+  select.sk-inp { appearance: none; -webkit-appearance: none; cursor: pointer; }
+  .sk-ck { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 0; flex: none; border: 2px solid var(--sk-ink); border-radius: 3px 6px 2px 5px / 5px 2px 6px 3px; background: var(--sk-sheet); cursor: pointer; position: relative; transform: rotate(-2deg); }
+  .sk-ck:checked::after, .sk-ck[data-state="checked"]::after { content: ""; position: absolute; left: 5px; top: -3px; width: 7px; height: 15px; border: solid var(--sk-red); border-width: 0 3px 3px 0; transform: rotate(40deg); }
+  .sk-ck:focus-visible { outline: 2px dashed var(--sk-red); outline-offset: 3px; }
+  .sk-err { color: #b8321f; font-size: 14px; }
+
+  /* Progress bar: pencil frame filled with hatching. */
+  .sk-pbar { position: relative; height: 16px; }
+  .sk-pbar .fill { position: absolute; left: 2px; top: 3px; bottom: 3px; background: repeating-linear-gradient(-55deg, var(--sk-ink) 0 1.3px, transparent 1.3px 5px); opacity: 0.75; transition: width 0.6s ease; }
+  .sk-pbar .fill.green { background: repeating-linear-gradient(-55deg, var(--sk-green) 0 1.4px, transparent 1.4px 5px); opacity: 1; }
+  .sk-pbar .fill.red { background: repeating-linear-gradient(-55deg, var(--sk-red) 0 1.4px, transparent 1.4px 5px); opacity: 1; }
+  .sk-pbar .fill.amber { background: repeating-linear-gradient(-55deg, var(--sk-amber) 0 1.4px, transparent 1.4px 5px); opacity: 1; }
+
+  /* Hand underlines. */
+  .sk-uline { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-color: rgba(214, 64, 43, 0.7); }
+  .sk-dotted { text-decoration: underline dotted; text-decoration-thickness: 2px; text-underline-offset: 4px; text-decoration-color: var(--sk-ink); cursor: help; }
+
+  .sk-cite { font-family: var(--font-code), monospace; font-size: 11px; font-weight: 700; vertical-align: super; padding: 0 4px; border: 0; background: none; color: var(--sk-red); cursor: pointer; }
+  .sk-ragmark { background: repeating-linear-gradient(-55deg, rgba(125, 185, 255, 0.45) 0 2px, transparent 2px 5px); outline: 2px solid rgba(43, 110, 196, 0.5); outline-offset: 3px; border-radius: 2px; }
+
+  .sk-fade { animation: skfade 0.6s ease both; }
+  .sk-pulse { animation: skpulse 1.6s ease-in-out infinite; }
+
+  /* Popovers, dialogs and toasts: a sheet of paper with a pencil outline and an offset hatch. */
+  .sk-sheet { position: relative; background: var(--sk-sheet); border: 1.8px solid var(--sk-ink); border-radius: 3px 8px 4px 9px / 9px 4px 8px 3px; box-shadow: 6px 6px 0 -1px rgba(34, 37, 46, 0.12); }
+}
+
+@keyframes skdraw { to { stroke-dashoffset: 0; } }
+@keyframes skpaint { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes skfade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes skpulse { 50% { opacity: 0.35; } }
+
+/* Long-form text (paper and article bodies, lessons): serif body, handwritten headings. */
+.prose {
+  font-family: var(--font-serif), Georgia, serif;
+  --tw-prose-body: #22252e;
+  --tw-prose-headings: #22252e;
+  --tw-prose-links: #22252e;
+  --tw-prose-bold: #22252e;
+  --tw-prose-quotes: #5b5f6b;
+  --tw-prose-quote-borders: #d6402b;
+  --tw-prose-code: #22252e;
+  --tw-prose-bullets: #5b5f6b;
+  --tw-prose-counters: #5b5f6b;
+}
+.prose h1, .prose h2, .prose h3 {
+  font-family: var(--font-hand), cursive;
+  font-weight: 700;
+  line-height: 1.1;
+}
+.prose h1 { font-size: 2.4em; }
+.prose h2 { font-size: 2em; }
+.prose h3 { font-size: 1.6em; }
+.prose a { text-decoration-color: rgba(214, 64, 43, 0.7); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+
 @layer utilities {
   .select-text {
     -webkit-user-select: text;
@@ -75,16 +239,29 @@
     -ms-user-select: text;
     user-select: text;
   }
-  
-  /* Custom selection color for paper reader */
   .prose ::selection {
-    background-color: rgb(99 102 241 / 0.3); /* indigo-500 with opacity */
+    background-color: rgba(255, 212, 59, 0.55);
     color: inherit;
   }
-  
   .prose ::-moz-selection {
-    background-color: rgb(99 102 241 / 0.3);
+    background-color: rgba(255, 212, 59, 0.55);
     color: inherit;
   }
 }
 
+/* Passage highlighted when a RAG citation is clicked (paper reader) */
+.rag-source-highlight {
+  background: repeating-linear-gradient(-55deg, rgba(125, 185, 255, 0.45) 0 2px, transparent 2px 5px);
+  outline: 2px solid rgba(43, 110, 196, 0.5);
+  outline-offset: 3px;
+  border-radius: 2px;
+  transition: outline-color 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-draw, .sk-loop { animation: none; stroke-dashoffset: 0; }
+  .sk-bs::before, .sk-tag::before, .sk-seg .sk-bseg { animation: none !important; }
+  .sk-fade, .sk-pulse { animation: none; }
+  .sk-wrap.hover:hover > .sk-card { transform: none; }
+  .sk-bsw { transition: none; }
+}

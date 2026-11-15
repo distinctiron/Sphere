@@ -1,0 +1,153 @@
+---
+id: national-security
+title: AI and national security
+summary: How states treat AI as a strategic technology. Defence and intelligence uses, labs' frontier-safety frameworks and dangerous-capability evals, the EU, US and Chinese approaches to regulation, compute governance, and the US–China race framing and its critics, presented even-handedly.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [export-controls]
+related: [sovereign-ai, labs, evals, agent-security, unit-economics, pretraining]
+keywords: ["national security", "AI Act", "frontier AI safety", "responsible scaling policy", "dangerous capabilities", "AI safety institute", "compute governance", "autonomous weapons", "AI race", "dual-use"]
+reviewed: 2026-09-29
+quiz:
+  - question: A lab reaches frontier-level capability using ten times less training compute than rivals. What does this do to governance based on compute thresholds?
+    options:
+      - Nothing; thresholds measure capability directly
+      - A model that raises the same concerns can fall below the threshold, so rules keyed to compute miss it and must lean more on evaluating capabilities directly
+      - It makes the model illegal
+      - It raises the threshold automatically
+    answer: 1
+    explanation: Compute is a proxy for capability, used because it is measurable and concentrated. Efficiency gains break the link between the two, so a fixed number of FLOP catches less of what policymakers care about. That is why frameworks pair compute thresholds with capability evaluations, and why thresholds get revisited.
+  - question: Why do defence ministries mostly buy frontier AI from commercial labs rather than training their own models?
+    options:
+      - Governments are not allowed to own computers
+      - Frontier training costs rise roughly two to three times a year and are recovered by serving huge commercial markets; a government-only model would bear the whole cost for far less use and fall behind
+      - Commercial models are always classified
+      - Military uses need no language models
+    answer: 1
+    explanation: From the labs and unit-economics lessons, frontier training is a fixed cost spread over all tokens served, and it grows each generation. Commercial labs amortise it over billions of users. A state building alone pays the full cost for a small user base. The trade-off is dependence on private firms, whose usage policies and priorities then matter for security.
+  - question: Why do arguments about racing China and arguments about catastrophic risk both tend to support governing compute?
+    options:
+      - They are the same argument
+      - Compute is the most concentrated, physical and measurable link; one side wants to deny it to rivals, the other wants visibility and safeguards for whoever uses the most of it
+      - Neither actually supports it
+      - Compute is the cheapest link to regulate because it has no suppliers
+    answer: 1
+    explanation: Policy targets the links it can see and control. Chips and data centers are few, large and traceable, unlike algorithms or data. A relative-capability view uses that to slow rivals; an absolute-risk view uses it to know who is training what and to require testing. This overlap explains why compute measures can win support from different political coalitions.
+  - question: A lab's safety framework says a model that crosses a biological-weapons uplift threshold must ship with stronger safeguards. What is the main limitation of the evaluation behind that decision?
+    options:
+      - Evaluations cannot be run on large models
+      - An evaluation can show a capability is present, but failing to find it does not prove it is absent, since better prompting, tools or fine-tuning may bring it out
+      - Evaluations are always public
+      - Thresholds are set by the model itself
+    answer: 1
+    explanation: Dangerous-capability evaluations test what the evaluators manage to elicit. A negative result is bounded by their effort and methods, and users with more time, tools or fine-tuning may achieve more. Frameworks therefore add safety margins and re-test as elicitation methods improve.
+---
+
+In 2025 the US Department of Defense signed contracts with several frontier labs. Labs publish frameworks that test each new model for help with bioweapons or cyberattacks before release. The EU's AI Act sets obligations for the largest models, while American states and the federal government argue over who may regulate AI at all. And the phrase "AI race with China" frames much of the debate in Washington and Beijing.
+
+This lesson places these developments on the bottleneck map. It gives you a way to read a new security policy, whether a defence contract, a safety framework or a regulation, by asking what the state is worried about and which link it can actually control.
+
+## The picture
+
+<Recall id="export-controls">
+
+Export controls deny a rival the chokepoints it depends on, mainly tools, top accelerators and HBM. They buy time, impose the cost of a detour, and spend leverage as the rival builds substitutes. China has answered with domestic chips, workarounds and controls on critical minerals.
+
+</Recall>
+
+States treat AI as a <Term id="dual-use">dual-use</Term> technology, like nuclear physics or cryptography: the same capability serves hospitals and weapons programmes. Two different security worries sit on the same map.
+- **Relative capability:** who has more and better AI, for military, intelligence and economic power. This worry drives export controls and domestic build-out.
+- **Absolute risk:** what any sufficiently capable AI could enable, whoever holds it: cyberattacks, help with biological or chemical weapons, accidents, or systems acting beyond human control. This worry drives evaluations, safety frameworks and regulation.
+
+Both converge on the same link. Algorithms, data and talent are hard to see or count. Compute is concentrated in a few chips, fabs and data centers, it is physical, and it is measurable in floating-point operations (FLOP). So it becomes the natural handle for racing and restraining alike.
+
+<Figure
+  name="compute-thresholds"
+  title="Fixed thresholds, moving frontier"
+  caption="Training compute of frontier models on a log scale, drawn as a trend through two widely cited estimates (GPT-3 in 2020, GPT-4 in 2023), about 4–5× growth per year. Horizontal lines mark thresholds used in regulation: 10²⁵ FLOP (EU AI Act) and 10²⁶ FLOP (US reporting rules)."
+  notice="The 10²⁵ line had already been passed by GPT-4, by outside estimates, before the EU law was finalised; the 10²⁶ line, set in 2023, was passed by frontier runs within about two years. Once crossed, a threshold catches more and more models, while a given capability keeps getting cheaper to reach."
+/>
+
+<KeyIdea>
+
+Security policy targets **the links it can see and control**. Compute is concentrated, physical and measurable, so both the race to lead and the effort to restrain risk reach for it. But compute is only a proxy for capability. The frontier grows about 4–5× a year and efficiency keeps improving, so every compute-based rule is a snapshot that must be revised.
+
+</KeyIdea>
+
+## AI in defence and intelligence
+
+Militaries use AI in several quite different ways:
+- **Decision support.** Sorting and analysing intelligence (satellite images, intercepted communications, open sources) and proposing targets for human review. The US Project Maven, started in 2017, is the best-known programme.
+- **Autonomy.** Drones and vehicles that navigate, and in some cases select targets, with less human control. The war in Ukraine has made cheap drones central, with autonomy increasingly used for the final approach when radio links are jammed.
+- **Cyber operations.** Finding and exploiting software vulnerabilities, and defending against the same. Frontier models have become markedly better at such tasks, which helps defenders and attackers alike.
+- **Logistics and administration,** the least visible but broadest use.
+
+Frontier labs are now part of this chain. In 2025 the Pentagon's AI office awarded contracts worth up to \$200 million each to Anthropic, Google, OpenAI and xAI. Rules on autonomy remain national: US policy requires "appropriate levels of human judgment over the use of force" in autonomous weapons, and international talks on lethal autonomous weapons have not produced a binding treaty. In 2024 the US and Chinese presidents did affirm that humans, not AI, should keep control over decisions to use nuclear weapons, a narrow but notable agreement.
+
+## Frontier-safety frameworks and dangerous-capability evals
+
+The leading labs publish <Term id="frontier-safety-framework">frontier-safety frameworks</Term>: Anthropic's Responsible Scaling Policy (2023), OpenAI's Preparedness Framework (2023) and Google DeepMind's Frontier Safety Framework (2024), among others. They share a structure. The lab names capability thresholds, such as meaningful help to someone trying to make a biological weapon, significant autonomous cyber-offence, or the ability to substantially speed up AI research itself. It tests each new model against them before release. If a model crosses a threshold, stronger safeguards are required before deployment. In May 2025, for example, Anthropic released a model under its higher "ASL-3" protections as a precaution.
+
+<Recall id="evals">
+
+An eval estimates how often a system does the right thing. It has cases that represent the job, a grader that decides what counts as success, and enough runs to see through the noise. Its results are only as good as how well the cases represent real use, and they depend on how the model is prompted and equipped.
+
+</Recall>
+
+<Term id="dangerous-capability-eval">Dangerous-capability evaluations</Term> apply this to misuse: expert red-teaming, benchmark tasks, and "uplift" studies that compare what people can do with and without the model. Government institutes, such as the UK's AI Security Institute and the US Center for AI Standards and Innovation, test some models before release by agreement with the labs. The central limitation is asymmetric: an evaluation can show that a capability is present, but not that it is absent, because someone with better prompts, tools or fine-tuning may elicit more than the testers did.
+
+## Regulation: three approaches
+
+- **European Union.** The <Term id="eu-ai-act">AI Act</Term> entered into force in 2024. It bans some uses, sets obligations by risk level, and since August 2025 imposes duties on providers of general-purpose models. Models trained with more than $10^{25}$ FLOP are presumed to pose systemic risk, with added duties to evaluate, report incidents and protect security. Rules for high-risk uses were due to phase in through 2026–27; in late 2025 the Commission proposed delaying some of them, a change that needed the agreement of the Parliament and member states.
+- **United States.** A 2023 executive order required developers to report training runs above $10^{26}$ FLOP; it was revoked in January 2025. Federal policy since has emphasised infrastructure, exports and lighter regulation. States stepped in: California's SB 53 (2025) requires large frontier developers to publish safety frameworks and report serious incidents, and others passed their own rules. Whether federal law should pre-empt state rules is contested: the Senate struck a proposed moratorium on state AI laws 99–1 in 2025. Late that year the administration turned to executive action, directing federal agencies to challenge state rules, a step whose legal reach is itself disputed, and Congress kept debating a federal standard.
+- **China.** Rules since 2023 require generative-AI services to register, pass security assessments and label AI-generated content, with a strong focus on content control. China has also published its own AI safety commitments and governance proposals.
+
+## Compute governance
+
+<Term id="compute-governance">Compute governance</Term> is the family of ideas that use the physical compute link as a lever: <Term id="compute-threshold">compute thresholds</Term> that trigger obligations; know-your-customer checks for anyone renting large amounts of cloud compute; tracking where advanced chips go; mechanisms built into chips to verify their location or use; and, in some proposals, licensing of the largest training runs or international verification, as in arms control.
+
+<Example title="what a threshold costs to reach">
+
+Take an H100-class GPU delivering about $4 \times 10^{14}$ useful FLOP/s (40% of peak), rented at \$2 an hour (rough 2025 figures).
+- $10^{25}$ FLOP ÷ $4 \times 10^{14}$ FLOP/s ≈ $2.5 \times 10^{10}$ GPU-seconds ≈ **6.9 million GPU-hours**, about **\$14 million**.
+- $10^{26}$ FLOP is ten times that: about **\$140 million**.
+
+When the EU threshold was set, crossing it was a frontier-lab project. With cheaper compute each year, it comes within reach of many more organisations, while algorithmic progress means a given capability needs fewer FLOP. A fixed threshold therefore catches more actors over time, but a smaller share of the capability it was meant to track.
+
+</Example>
+
+## The race framing and its critics
+
+**The race view** holds that advanced AI will confer large military and economic advantages; that it matters whether democracies or authoritarian states lead; and that the compute lead is the most controllable advantage, so the US should build fast at home, deny chokepoints to China and bring allies into its stack. Many in Beijing frame the contest similarly, in reverse.
+
+**Critics** make several arguments. Racing encourages cutting corners on safety at the moment it matters most. The framing may misjudge the rival, either overstating its intentions or understating its ability to route around controls. And treating AI purely as a contest weakens the channels needed to manage shared risks, such as biological misuse, cyber escalation and AI in nuclear command, which threaten both sides.
+
+Between these positions sits a common middle: **compete on capability, cooperate on specific shared risks**. The 2024 nuclear-control statement, networks of government safety institutes and United Nations dialogues on AI are examples. Whether such cooperation can survive intensifying competition is an open question.
+
+## Reason with it
+
+**A lab reaches frontier capability with ten times less compute than rivals. What happens to compute governance?** The link between compute and capability weakens, so a model with the same risks can fall below any FLOP threshold, and export controls on compute buy less time. Governance must lean more on testing capabilities directly, and on the frameworks labs apply to their own models. Compute remains the easiest link to see, but no longer the whole story.
+
+**Why do defence ministries buy from commercial labs instead of building their own models?** From the treadmill in the labs lesson and the fixed costs in the unit-economics lesson: frontier training costs rise roughly two to three times a year and are recovered by serving huge markets. A state building alone would pay the full cost for a tiny user base, and fall behind within a generation. The price is dependence on private firms, whose usage policies, security and priorities become matters of national security.
+
+**Why do race arguments and safety arguments both end up supporting compute measures?** Because they target the same visible link for different reasons: one to deny rivals, the other to know who trains the largest models and to require testing. That overlap predicts which policies survive changes of government. Measures justified both ways, like chip tracking and reporting of the largest runs, tend to persist even when their stated rationale changes.
+
+## Where this picture breaks
+
+- **Capability is not only compute.** Algorithms, data, talent and how models are deployed matter too, and they are much harder to control.
+- **Open weights move capability across borders** regardless of chip rules, a point made in the export-controls lesson.
+- **Evaluations are young.** Methods for measuring dangerous capabilities are still developing, and thresholds are judgement calls.
+- **Militaries adopt slowly.** Procurement, testing, doctrine and integration matter more than which model is best; battlefield effect lags technical progress.
+- **Not all threats come from states.** Fraud, harassment and cybercrime with cheap open models are security problems too, and compute governance aimed at frontier runs does little about them.
+
+## Why it matters in the feed
+
+When a lab signs a defence contract, look at the use (analysis, cyber, autonomy) and at the usage limits the lab keeps. When a safety framework is updated, check which thresholds moved and what safeguards they trigger. When a regulation mentions a FLOP threshold, estimate what it costs to cross today and how many models already have. And when you read about the "AI race", ask which link the argument wants to control, and whether it leaves room for cooperation on risks both sides share.
+
+## Recap
+
+- States treat AI as **dual-use**. Two worries, **relative capability** and **absolute risk**, act on the same map.
+- Both reach for **compute**, the most concentrated and measurable link, extending the deny logic of export controls to visibility and safeguards.
+- Labs' **frontier-safety frameworks** tie thresholds for dangerous capabilities to required safeguards; evaluations can show presence, not absence.
+- Regulation differs: the **EU AI Act** (with a $10^{25}$ FLOP presumption), a contested US mix of federal and state rules, and China's registration and content controls.
+- The **race framing** has strong proponents and serious critics; a common middle competes on capability and cooperates on shared risks.

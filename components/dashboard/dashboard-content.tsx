@@ -29,12 +29,8 @@ import { DraggablePaperCard } from "@/components/dashboard/draggable-paper-card"
 import { SectionDropZone } from "@/components/dashboard/section-drop-zone";
 import { CategoryFilter } from "@/components/dashboard/category-filter";
 import { Button } from "@/components/ui/button";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { ChevronDown, Filter } from "lucide-react";
+import { SketchFrame } from "@/components/sketch";
+import { AppHeader } from "@/components/sketch/app-header";
 import { useRouter } from "next/navigation";
 
 interface Paper {
@@ -61,7 +57,24 @@ interface PapersResponse {
   papers: Paper[];
 }
 
+type IncomingScope = "new" | "all";
+
+interface IncomingMeta {
+  scope: IncomingScope;
+  since: string | null;
+  isFirstVisit: boolean;
+  total: number;
+  pendingScores: number;
+}
+
+interface IncomingResponse extends PapersResponse {
+  meta?: IncomingMeta;
+}
+
 type SectionId = "incoming" | "library";
+
+/** How often to check whether pending novelty scores have been computed */
+const SCORE_POLL_INTERVAL_MS = 60_000;
 
 export function DashboardContent() {
   const [incomingPapers, setIncomingPapers] = useState<Paper[]>([]);
@@ -69,10 +82,12 @@ export function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [draggedFromSection, setDraggedFromSection] = useState<SectionId | null>(null);
   const [overDropZone, setOverDropZone] = useState<SectionId | null>(null);
+  const [incomingScope, setIncomingScope] = useState<IncomingScope>("new");
+  const [incomingMeta, setIncomingMeta] = useState<IncomingMeta | null>(null);
+  const [incomingLoading, setIncomingLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const initialScrollLeftRef = useRef<number | null>(null);
   const router = useRouter();
@@ -134,7 +149,7 @@ export function DashboardContent() {
 
         // Fetch incoming articles and library papers in parallel
         const [incomingResponse, libraryResponse] = await Promise.all([
-          fetch("/api/papers?status=NEW"),
+          fetch("/api/papers?status=NEW&scope=new"),
           fetch("/api/papers?inLibrary=true"),
         ]);
 
@@ -142,10 +157,11 @@ export function DashboardContent() {
           throw new Error("Failed to fetch papers");
         }
 
-        const incomingData: PapersResponse = await incomingResponse.json();
+        const incomingData: IncomingResponse = await incomingResponse.json();
         const libraryData: PapersResponse = await libraryResponse.json();
 
         setIncomingPapers(incomingData.papers);
+        setIncomingMeta(incomingData.meta ?? null);
         
         // Sort library papers: unread papers first, read papers last
         // Within each group, preserve existing ordering (display_order, novelty score, etc.)
@@ -179,6 +195,75 @@ export function DashboardContent() {
 
     fetchPapers();
   }, []);
+
+  // Poll for novelty scores computed in the background (Story 6.4)
+  const hasPendingScores = incomingPapers.some((p) => p.noveltyScore === null);
+  useEffect(() => {
+    if (!hasPendingScores) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch(`/api/papers?status=NEW&scope=${incomingScope}`);
+        if (!response.ok) return;
+        const data: IncomingResponse = await response.json();
+        const scores = new Map(data.papers.map((p) => [p.id, p]));
+        // Only fill in scores; don't reorder or add cards under the user
+        setIncomingPapers((prev) =>
+          prev.map((paper) => {
+            const updated = scores.get(paper.id);
+            return paper.noveltyScore === null && updated?.noveltyScore != null
+              ? { ...paper, noveltyScore: updated.noveltyScore, noveltySummary: updated.noveltySummary }
+              : paper;
+          })
+        );
+      } catch {
+        // Try again next interval
+      }
+    }, SCORE_POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [hasPendingScores, incomingScope]);
+
+  const handleChangeIncomingScope = async (scope: IncomingScope) => {
+    if (scope === incomingScope || incomingLoading) return;
+    setIncomingLoading(true);
+    try {
+      const response = await fetch(`/api/papers?status=NEW&scope=${scope}`);
+      if (!response.ok) throw new Error("Failed to fetch papers");
+      const data: IncomingResponse = await response.json();
+      setIncomingPapers(data.papers);
+      setIncomingMeta(data.meta ?? null);
+      setIncomingScope(scope);
+    } catch (err) {
+      console.error("Error fetching incoming papers:", err);
+      toast.error("Failed to load papers. Please try again.");
+    } finally {
+      setIncomingLoading(false);
+    }
+  };
+
+  // Manually score a paper whose background scoring hasn't completed
+  const handleScorePaper = async (paperId: string) => {
+    const response = await fetch(`/api/papers/${paperId}/score`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const message =
+        response.status === 402
+          ? data.message || "Scoring on demand needs a paid plan."
+          : data.message || "Scoring is unavailable right now. Please try again later.";
+      toast.error(message);
+      throw new Error(message);
+    }
+
+    setIncomingPapers((prev) =>
+      prev.map((paper) =>
+        paper.id === paperId
+          ? { ...paper, noveltyScore: data.score ?? null, noveltySummary: data.summary ?? null }
+          : paper
+      )
+    );
+  };
 
   const handleViewPaper = (paperId: string) => {
     router.push(`/papers/${paperId}`);
@@ -585,21 +670,34 @@ export function DashboardContent() {
     return [...incomingPapers, ...libraryPapers].find((p) => p.id === activeId);
   }, [activeId, incomingPapers, libraryPapers]);
 
+  const pageTitle = (
+    <div>
+      <h1 className="m-0 font-hand text-[64px] font-bold leading-none">Impact Dashboard</h1>
+      <svg width="300" height="18" viewBox="0 0 300 18" aria-hidden="true" className="mt-0.5 block max-w-full overflow-visible">
+        <path className="sk-draw" pathLength={1} d="M3 10 C 70 4, 150 13, 220 7 S 285 5, 297 9" style={{ animationDelay: ".2s", animationDuration: "1.1s" }} />
+        <path className="sk-draw p2" pathLength={1} d="M292 12 C 230 11, 160 15, 90 11 S 20 12, 8 13" style={{ animationDelay: "1s", animationDuration: ".8s" }} />
+      </svg>
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="container mx-auto p-8">
-        <h1 className="text-3xl font-bold mb-4">Dashboard</h1>
-        <p className="text-muted-foreground">Loading papers...</p>
+      <div className="mx-auto flex max-w-[1240px] flex-col gap-9 px-6 pb-16 pt-6">
+        <AppHeader active="papers" />
+        {pageTitle}
+        <p className="sk-pulse m-0 font-hand text-[26px] text-pencil">Sharpening pencils… loading papers</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="container mx-auto p-8">
-        <h1 className="text-3xl font-bold mb-4">Dashboard</h1>
-        <div className="rounded-md bg-destructive/15 p-4 text-destructive">
-          {error}
+      <div className="mx-auto flex max-w-[1240px] flex-col gap-9 px-6 pb-16 pt-6">
+        <AppHeader active="papers" />
+        {pageTitle}
+        <div role="alert" className="relative max-w-2xl bg-sheet p-4 text-pen">
+          <SketchFrame seed="dashboard-error" w={640} h={60} tone="red" />
+          <span className="relative">{error}</span>
         </div>
       </div>
     );
@@ -617,7 +715,7 @@ export function DashboardContent() {
     >
       <div 
         ref={containerRef}
-        className="w-full h-full overflow-y-auto p-8 max-w-6xl mx-auto overflow-x-hidden relative"
+        className="relative mx-auto flex h-full w-full max-w-[1240px] flex-col gap-9 overflow-y-auto overflow-x-hidden px-6 pb-16 pt-6"
         style={{ 
           overscrollBehaviorX: 'none',
           scrollBehavior: 'auto',
@@ -625,17 +723,19 @@ export function DashboardContent() {
           touchAction: 'pan-y'
         }}
       >
-        {/* Header */}
-        <header className="mb-8 flex justify-between items-end">
+        <AppHeader active="papers" />
+
+        {/* Title */}
+        <section className="flex flex-wrap items-end justify-between gap-5">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-900 mb-1">
-              Impact Dashboard
-            </h1>
-            <p className="text-slate-500 text-sm">
-              Your daily feed of high-novelty research.
+            {pageTitle}
+            <p className="m-0 mt-2.5 max-w-[560px] text-pencil">
+              {incomingMeta?.scope === "new" && !incomingMeta.isFirstVisit
+                ? `${incomingMeta.total} new ${incomingMeta.total === 1 ? "paper" : "papers"} since your last visit.`
+                : "Your daily feed of high-novelty research. Drag the ones worth keeping into your library."}
             </p>
           </div>
-        </header>
+        </section>
 
         {/* Novelty Carousel */}
         <NoveltyCarousel
@@ -643,58 +743,51 @@ export function DashboardContent() {
           onViewPaper={handleViewPaper}
         />
 
-        {/* Collapsible Category Filter */}
+        {/* Category Filter */}
         {availableCategories.length > 0 && (
-          <Collapsible
-            open={filtersOpen}
-            onOpenChange={setFiltersOpen}
-            className="mb-8"
-          >
-            <CollapsibleTrigger asChild>
-              <Button variant="outline" className="w-full justify-between">
-                <div className="flex items-center gap-2">
-                  <Filter className="h-4 w-4" />
-                  <span>Filters</span>
-                  {selectedCategories.length > 0 && (
-                    <span className="ml-2 text-xs bg-primary text-primary-foreground px-2 py-0.5 rounded-full">
-                      {selectedCategories.length}
-                    </span>
-                  )}
-                </div>
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform duration-200 ${
-                    filtersOpen ? "transform rotate-180" : ""
-                  }`}
-                />
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="mt-4">
-              <div className="rounded-lg border bg-card p-4">
-                <CategoryFilter
-                  categories={availableCategories}
-                  selectedCategories={selectedCategories}
-                  onCategoryToggle={handleCategoryToggle}
-                  onClearFilters={handleClearFilters}
-                />
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+          <CategoryFilter
+            categories={availableCategories}
+            selectedCategories={selectedCategories}
+            onCategoryToggle={handleCategoryToggle}
+            onClearFilters={handleClearFilters}
+          />
         )}
 
         {/* Two Sections: Incoming Articles and My Library - Side by Side */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 gap-11 lg:grid-cols-2">
           {/* Incoming Articles Section */}
           <SectionDropZone id="incoming-drop-zone">
             <section className="h-full">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
-                Incoming Articles
-              </h2>
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="m-0 font-hand text-[40px] font-bold leading-none">
+                  {incomingScope === "new" ? "New articles" : "All incoming"}{" "}
+                  <span className="text-[26px] text-pencil">({filteredIncomingPapers.length})</span>
+                </h2>
+                <div role="group" aria-label="Which papers" className="flex">
+                  {(["new", "all"] as const).map((scope) => (
+                    <button
+                      key={scope}
+                      type="button"
+                      className="sk-seg"
+                      aria-pressed={incomingScope === scope}
+                      disabled={incomingLoading}
+                      onClick={() => incomingScope !== scope && handleChangeIncomingScope(scope)}
+                    >
+                      <span className="sk-bseg" aria-hidden="true" />
+                      <span className="lbl">{scope === "new" ? "Only new" : "Earlier too"}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {filteredIncomingPapers.length === 0 ? (
-                <div className="rounded-lg border border-dashed p-12 text-center">
-                  <p className="text-muted-foreground">
+                <div className="relative flex flex-col items-center bg-sheet/60 px-6 py-12 text-center">
+                  <SketchFrame seed="incoming-empty" w={576} h={180} dashed faint />
+                  <p className="relative m-0 font-hand text-[26px] leading-tight text-pencil">
                     {incomingPapers.length === 0
-                      ? "No papers available. Papers will appear here after your first login."
+                      ? incomingScope === "new"
+                        ? "No new papers since your last visit."
+                        : "No papers available yet. New papers are fetched and scored every hour."
                       : selectedCategories.length > 0
                       ? "No papers found matching the selected filters."
                       : "No papers to display. All papers have been dismissed."}
@@ -704,14 +797,24 @@ export function DashboardContent() {
                       variant="outline"
                       size="sm"
                       onClick={handleClearFilters}
-                      className="mt-4"
+                      className="mt-5"
                     >
                       Clear filters
                     </Button>
                   )}
+                  {incomingPapers.length === 0 && incomingScope === "new" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleChangeIncomingScope("all")}
+                      className="mt-5"
+                    >
+                      Show earlier papers
+                    </Button>
+                  )}
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-[26px]">
                   {filteredIncomingPapers.map((paper) => (
                     <DraggablePaperCard
                       key={paper.id}
@@ -719,6 +822,7 @@ export function DashboardContent() {
                       onViewPaper={handleViewPaper}
                       onAddToLibrary={handleAddToLibrary}
                       onDismiss={handleDismiss}
+                      onScore={handleScorePaper}
                     />
                   ))}
                 </div>
@@ -730,20 +834,22 @@ export function DashboardContent() {
           <SectionDropZone 
             id="library-drop-zone"
             isEmpty={libraryPapers.length === 0}
-            emptyMessage="Drag papers from Incoming Articles to add them to your library."
+            emptyMessage="Your library is empty. Drag a paper here, or press + to keep it."
             isManuallyOver={overDropZone === "library" && draggedFromSection === "incoming"}
           >
             <section className="h-full">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
-                My Library
-              </h2>
+              <div className="mb-6 flex min-h-[44px] items-center">
+                <h2 className="m-0 font-hand text-[40px] font-bold leading-none">
+                  Library <span className="text-[26px] text-pencil">({libraryPapers.length})</span>
+                </h2>
+              </div>
 
               {libraryPapers.length === 0 ? null : (
                 <SortableContext
                   items={libraryPapers.map((p) => p.id)}
                   strategy={verticalListSortingStrategy}
                 >
-                  <div className="space-y-3">
+                  <div className="space-y-[26px]">
                     {libraryPapers.map((paper) => (
                       <SortablePaperCard
                         key={paper.id}
@@ -765,7 +871,7 @@ export function DashboardContent() {
       {/* Drag Overlay */}
       <DragOverlay>
         {activePaper ? (
-          <div className="opacity-50">
+          <div className="rotate-1 opacity-80">
             <PaperListCard
               paper={activePaper}
               onViewPaper={handleViewPaper}

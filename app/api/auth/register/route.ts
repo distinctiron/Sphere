@@ -58,6 +58,9 @@ export async function POST(request: Request) {
       },
     });
 
+    // Billing plan with an empty wallet: the user starts on the free tier
+    await db.paymentPlan.create({ data: { userId: user.id } });
+
     // Seed papers in the background (don't block registration response)
     // If seeding fails, user is still created and can use the app
     seedPapersForUser({

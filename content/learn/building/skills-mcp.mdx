@@ -1,0 +1,160 @@
+---
+id: skills-mcp
+title: Skills, MCP and plugins
+summary: How agents gain capabilities without carrying them all in every context. Skills are packaged know-how loaded only when relevant; the Model Context Protocol is a standard way for any harness to discover and call external tools and data; plugins bundle both.
+minutes: 11
+model: context-machine
+buildsOn: [harness-engineering, tool-use]
+related: [context-engineering, rag, agent-security, evals]
+keywords: ["Model Context Protocol", "MCP", "MCP server", "Agent Skills", "SKILL.md", "progressive disclosure", "plugins", "tool integrations", "connectors"]
+reviewed: 2026-09-29
+quiz:
+  - question: An agent has 50 skills installed. At the start of a new task, what does its context hold from those skills?
+    options:
+      - Nothing; skills are only discovered by searching the disk
+      - The full instructions of all 50 skills
+      - Each skill's name and short description, so the model can recognise when one is relevant
+      - Every file and script of every skill
+    answer: 2
+    explanation: Progressive disclosure keeps a cheap index (names and descriptions, around a hundred tokens each) always in context. The full SKILL.md is read only when the model judges it relevant, and further files only when the instructions point to them.
+  - question: A well-written skill for “quarterly revenue reports” never gets used, even when users ask for exactly that. What is the most likely cause?
+    options:
+      - Its description does not match how users phrase such requests, so the model never recognises that it should load the skill
+      - Its instructions are too long
+      - Skills only work in plan mode
+      - The model has already memorised the skill
+    answer: 0
+    explanation: Until a skill is loaded, its description is all the model sees of it. Relevance is judged from that text alone, so the description is the trigger. Describe when to use the skill, in the words users and tasks actually use.
+  - question: With MCP, how does a model call a tool that lives on a remote server?
+    options:
+      - It opens a network connection to the server itself
+      - The server injects the answer into the model's weights
+      - It cannot; MCP servers only provide documents
+      - It emits an ordinary tool call; the harness's MCP client forwards it to the server over the protocol and appends the response as an ordinary tool result
+    answer: 3
+    explanation: MCP standardises the plumbing between harness and server, not the model's side. To the model, an MCP tool is a definition in its context and a result that later appears there, exactly as in the tool-use lesson.
+  - question: Ten AI applications each want to connect to the same twenty external services. How many integrations must be written without a shared protocol, and with one?
+    options:
+      - 30 without, 200 with
+      - 200 without, 30 with
+      - 20 without, 10 with
+      - 200 either way
+    answer: 1
+    explanation: Without a standard, every application needs custom glue for every service, 10 × 20 = 200 pieces. With a shared protocol, each application implements a client once and each service implements a server once, 10 + 20 = 30. That arithmetic is why a standard spreads quickly once enough parties adopt it.
+---
+
+An agent that can do everything would need to know how to do everything. It would have to carry instructions for every file format, every internal convention and every external system. But as the last lessons showed, everything an agent carries sits in its context, costing tokens and attention on every call. Capability and focus pull against each other.
+
+Two ideas have become the standard way out, and both are context management in disguise. **Skills** package know-how so it is loaded only when a task needs it. The **Model Context Protocol** (MCP) gives any harness a standard way to discover and call tools and data that live elsewhere. **Plugins** bundle both, so a whole capability can be installed in one step.
+
+## The picture
+
+In this path's picture, the model can only use what is in its context. So an agent's capabilities are bounded by what the harness *can* bring into the context when needed, not by what is in the context right now. Extending an agent therefore means widening what can enter the context, while keeping what *does* enter small.
+
+<Recall id="harness-engineering">
+
+The harness manages the context over time. Memory files such as CLAUDE.md are loaded at the start of every session; compaction and sub-agents keep long tasks within the window; and outbound, tool calls pass hooks, permissions and sandboxes. Deterministic rules belong in code; judgment and know-how belong in the context.
+
+</Recall>
+
+<KeyIdea>
+
+Skills and MCP expand what an agent can **reach** without expanding what it must **carry**. The pattern is the same in both: a short description is always present, and the details are pulled in only when the model decides they are relevant. The name for this is <Term id="progressive-disclosure">progressive disclosure</Term>.
+
+</KeyIdea>
+
+## Skills: know-how on demand
+
+A <Term id="agent-skill">skill</Term> is a folder. At its heart is a `SKILL.md` file: a short header with a **name** and a **description**, then instructions in plain Markdown. Next to it can sit reference documents, templates and scripts. A skill for filling PDF forms might hold instructions for the general workflow, a detailed reference on form fields, and a script that actually writes the values into the file.
+
+The harness exposes the skill in three levels.
+
+1. **Always:** the name and description of every installed skill, typically a sentence or two each, sit in the context. This is the "skill index" station in the harness figure.
+2. **When relevant:** if the task matches a description, the model reads the full `SKILL.md`. It does this with an ordinary tool call (reading a file), which the harness executes like any other.
+3. **Only if needed:** the instructions point to further files ("for XFA forms, read forms.md") and scripts. The model reads a file only if its situation calls for it. It **runs** scripts rather than reading them, so their code never enters the context; only their output does.
+
+<Figure
+  name="progressive-disclosure"
+  title="Skills: descriptions always, details on demand"
+  caption="Four skills on disk (left) and the context (right). At the start the context holds only their names and descriptions. When a PDF task arrives, the model reads the PDF skill's instructions, then one reference file they point to, then runs a bundled script and reads only its output."
+  notice="The script's source is never loaded. Code that the model runs, rather than reads, adds capability at almost no context cost."
+/>
+
+<Example title="how disclosure scales">
+
+In the figure, the PDF task loads about 5,460 tokens: 400 for four descriptions, 3,000 for one SKILL.md, 2,000 for one reference file and a short script output. Loading every file of every skill would cost 15,500 tokens on every call, for every task.
+
+Scale to 40 installed skills, each about 5,000 tokens in full with a 100-token description. The always-present index is $40 \times 100 = 4{,}000$ tokens. Loading everything would be $40 \times 5{,}000 = 200{,}000$ tokens, a whole context window, before the task even starts. With progressive disclosure, the cost of a skill you are not using is its description.
+
+</Example>
+
+Two consequences follow from level 1. First, **the description is the trigger**. The model decides relevance from that text alone, so a skill whose description does not match how tasks are phrased is never loaded, however good its instructions. Second, skills are cheap to own: installing one more costs a sentence of context, not its full size.
+
+It helps to place skills against the other mechanisms you have met:
+
+| Mechanism | What it adds | When it is in context |
+|---|---|---|
+| Memory file | Facts about this project | Always |
+| Skill | Know-how: procedures, references, scripts | Description always; body on demand |
+| Tool | An action the harness can execute | Definition always (or on demand) |
+| Sub-agent | A fresh context to work in | Never in the main context; only its report |
+
+A skill adds no new *access*. It teaches the model how to use the tools it already has (reading files, running scripts) for a particular kind of job.
+
+## MCP: a standard socket for tools and data
+
+<Recall id="tool-use">
+
+To the model, a tool is a definition in its context (name, description, input schema) and, later, a result in its context. The harness executes the call with its own credentials, so all real capability lives in the harness.
+
+</Recall>
+
+Giving an agent new *access*, to an issue tracker, a database or a company wiki, means writing tools. Before a standard existed, every application wrote its own glue for every service. The <Term id="model-context-protocol">Model Context Protocol</Term>, an open protocol Anthropic introduced in late 2024 that has since been adopted widely across the industry, standardises that glue.
+
+- A **host** is the application running the harness: a coding agent, an IDE, a desktop chat app.
+- For each connected service, the host runs an **MCP client**, which talks to an <Term id="mcp-server">MCP server</Term>. The server can be a local process, or a remote service reached over HTTP. Messages are JSON-RPC.
+- A server offers three kinds of things: **tools** the model can call; **resources**, data such as files or records that the application can read and place into the context; and **prompts**, reusable templates a user can invoke.
+
+On connecting, the client asks the server what it offers, and the harness adds those tool definitions to the model's context. When the model calls one, the harness routes the call through the client to the server and appends the response as a tool result. Nothing changes on the model's side: **an MCP tool is just a tool**. The protocol standardises the harness side.
+
+<Figure
+  name="mcp-architecture"
+  title="One protocol between any harness and any service"
+  caption="The host (the harness) runs one MCP client per server. On connect, each client asks its server what it offers, and the tools appear in the model's context. When the model calls run_query, the harness routes the call through the database client to its server, and the result returns as an ordinary tool result."
+  notice="The model never talks to a server. It writes the same kind of tool call as always; only the harness knows the tool lives behind MCP."
+/>
+
+The payoff is arithmetic. Ten applications and twenty services need $10 \times 20 = 200$ custom integrations without a shared protocol, and $10 + 20 = 30$ implementations with one. Each side implements the protocol once and works with everything on the other side.
+
+There is a context cost, straight from the tool-use lesson: every connected server's tool definitions are context. Ten servers with twenty tools each put two hundred definitions, many thousands of tokens, into every call. Harnesses answer with the same trick as skills. Some list only tool names and load a full schema when the model searches for a tool it needs: progressive disclosure, applied to tools.
+
+## Plugins: packaging a harness configuration
+
+Skills, MCP servers, hooks, sub-agent definitions and custom commands are all pieces of harness configuration. A <Term id="agent-plugin">plugin</Term> bundles a set of them into one installable unit. A team can share "how we work with our monorepo" as one plugin: a skill for its conventions, an MCP server for its internal tools, a hook that runs its linters, and a sub-agent for code review. Claude Code, for example, installs plugins from marketplaces: catalogues that a company, a team or anyone else can publish.
+
+## Reason with it
+
+**Should a new capability be a skill or an MCP server?** Ask whether it needs new *access* or new *know-how*. Connecting to a system the harness cannot otherwise reach, such as an authenticated API or a remote database, needs an MCP server (or a built-in tool). Teaching the agent a procedure with tools it already has, such as "how our team writes release notes" or "how to fill this form with this script", is a skill. Many real setups use both: the server provides access to the issue tracker, and a skill says how your team writes good issues.
+
+**Why can an agent with a hundred skills still start each task with a small, focused context?** Only level 1 is always present: a hundred short descriptions, a few thousand tokens. The details of the one or two skills a task needs arrive on demand, and the rest cost only their descriptions. The limit on the number of skills is the model's ability to choose between descriptions, not the window.
+
+**Why is installing a skill, an MCP server or a plugin a security decision?** Each one puts text into the context: descriptions, instructions, tool definitions and results. The model treats that text as guidance about what to do. A malicious or compromised skill or server can therefore steer the agent, and a server or script also runs code with real access. As the harness lesson put it, permissions guard actions, not the content of the context. That is why <Preview id="agent-security">agent security</Preview> treats every such source as a trust decision.
+
+## Where this picture breaks
+
+- **Relevance is the model's judgment.** Progressive disclosure fails silently when the model does not realise it needs a skill or a tool. Nothing errors; the agent just does the task less well. Test that skills actually trigger, which is an evaluation problem.
+- **Not everything should be deferred.** Knowledge needed on nearly every call is cheaper and more reliable in the always-present layer, such as the memory file or the system prompt, than fetched again and again.
+- **A standard protocol does not make a good tool.** MCP standardises the plumbing. A server with vague descriptions, bloated results or unhelpful errors is exactly as bad as any other poorly designed tool.
+- **The details move fast.** The MCP specification has been revised repeatedly (transports, authentication, new capabilities), and skill and plugin formats are young. The durable ideas are progressive disclosure and a shared protocol between harnesses and services.
+
+## Why it matters in the feed
+
+When a company announces "an MCP server for our product", it is making its service callable from every MCP-capable agent at once, which is the 10 + 20 arithmetic at work. When other labs and tool makers adopt the protocol, its value to everyone grows with each new participant. When "skills" or "plugin marketplaces" launch, read them as ways to distribute harness configuration: know-how and access, packaged. And when a security researcher reports a poisoned tool description or a malicious skill, you know why it works. Those descriptions are context, and context steers the model.
+
+## Recap
+
+- An agent can only use what is in its context, so extending it means widening what *can* enter while keeping what *does* enter small: progressive disclosure.
+- Skills are folders of know-how. Their descriptions are always loaded, the body is read when relevant and further files or scripts are used only if needed, and the description is the trigger.
+- MCP is a standard protocol between hosts (harnesses) and servers offering tools, resources and prompts. To the model an MCP tool is just a tool, as in the tool-use lesson.
+- Each connected tool costs context, so harnesses apply progressive disclosure to tools too.
+- Plugins bundle skills, MCP servers, hooks and sub-agents: the harness engineering of the previous lesson, packaged for sharing. Every one of them is a trust decision.

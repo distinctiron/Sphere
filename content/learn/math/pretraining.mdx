@@ -1,0 +1,177 @@
+---
+id: pretraining
+title: Pretraining & scaling laws
+summary: How a language model learns from raw text. Predicting the next token of trillions of tokens is a landscape whose floor can only be approached by learning what the text is about. Its cost is about 6 × parameters × tokens, and loss falls predictably as a power law in compute.
+minutes: 12
+model: loss-landscape
+buildsOn: [transformer, probability, gradient-descent, backpropagation]
+related: [training-in-practice, embeddings, post-training, distributed-training, energy, buildout, labs]
+keywords: ["pretraining", "pre-training", "scaling laws", "Chinchilla", "next-token prediction", "training compute", "training tokens", "compute-optimal", "base model", "FLOPs"]
+quiz:
+  - question: A lab has a fixed compute budget. Under the Chinchilla picture, what is the best way to spend four times more compute than its last model used?
+    options:
+      - Make the model four times larger and keep the same data
+      - Train the same model on four times more data
+      - Make the model about twice as large and train it on about twice as many tokens
+      - Spend it on more epochs over the same data
+    answer: 2
+    explanation: Compute is about 6 × N × D. Compute-optimal training grows parameters and tokens roughly together, each with the square root of compute, so 4× compute means about 2× parameters and 2× tokens. Putting it all into size leaves the model under-trained; putting it all into data leaves it too small to absorb what the data holds.
+  - question: Why does a lab deliberately train an 8B-parameter model on 15 trillion tokens, nearly 100 times the compute-optimal ratio of about 20 tokens per parameter?
+    options:
+      - Because the scaling laws are wrong for small models
+      - Because extra data is free
+      - Because the model will be run for enormous numbers of tokens after training, and a smaller model that reaches a given quality is much cheaper to serve per token, even if it cost more to train
+      - Because overtraining makes the loss fall below the irreducible floor
+    answer: 2
+    explanation: Serving costs about 2 × N FLOPs per token for the model’s whole life. Chinchilla optimises only the training bill. When a model will generate trillions of tokens, paying extra training compute to shrink N saves far more at inference.
+  - question: Estimate the training compute of a 70-billion-parameter model trained on 1.4 trillion tokens.
+    options:
+      - About 2 × 10²³ FLOPs
+      - About 6 × 10²³ FLOPs
+      - About 6 × 10²⁵ FLOPs
+      - About 10²¹ FLOPs
+    answer: 1
+    explanation: 6 × 70 × 10⁹ × 1.4 × 10¹² ≈ 5.9 × 10²³ FLOPs. The 6 is 2 FLOPs per parameter per token for the forward pass plus about 4 for the backward pass, which costs roughly twice the forward pass.
+  - question: Using the probability lesson, why can’t a model’s pretraining loss ever reach zero, however large it gets?
+    options:
+      - Because of rounding errors in the GPU
+      - Because much of the next token is genuinely uncertain given the text so far (the next word of a story, a random name), so even perfect beliefs have positive average surprise
+      - Because the learning rate never reaches zero
+      - Because cross-entropy is always at least 1
+    answer: 1
+    explanation: Cross-entropy is minimised by predicting the true probabilities, and then equals the entropy of the text itself. Human text has real uncertainty, so that floor is positive. Scaling laws model it as the constant E that the loss approaches but never crosses.
+---
+
+Every capability a language model has, from grammar and facts to coding and chains of reasoning, starts in one long training run with a deceptively simple goal: **predict the next token**. The largest such runs occupy tens of thousands of chips for months and cost enough that labs plan them years ahead with mathematical forecasts. This lesson explains the goal, why it is so powerful, what it costs, and the **scaling laws** that make those forecasts possible.
+
+## The picture
+
+Use this path’s second mental model. Training is a walk downhill on a landscape whose height is the loss. In <Term id="pretraining">pretraining</Term>, the landscape is defined by essentially all the text a lab can gather, trillions of tokens of it. The height at any point, meaning any setting of the parameters, is the model’s **average surprise** at the next token across all that text.
+
+The key property is what the floor of this landscape demands. Text was written by people describing a world. To be less surprised by the next token of a physics derivation, a court ruling, a Python file or a novel, a model has to capture whatever produced that token: grammar, facts, arithmetic, the intentions of characters. Every one of those regularities is a way down.
+
+<Figure
+  name="next-token-loss"
+  title="The text is its own label"
+  caption="For each position in “The capital of France is Paris.”, the model predicts the next token. Upper bars: the probability it gave to the token that actually came next. Lower bars: the surprise, −ln p. The training loss is the average."
+  notice="The expensive surprises are the tokens that need knowledge: “capital” after “The” is a guess, but “Paris” after “The capital of France is” costs almost nothing, if the model knows its geography."
+/>
+
+<KeyIdea>
+
+Next-token prediction turns all text into supervised training data, with no labelling. The only way to keep lowering the loss is to learn more about what the text describes, so a model walking down this landscape is pushed to absorb language, knowledge and patterns of reasoning, because each of them lowers the surprise.
+
+</KeyIdea>
+
+## The objective: average surprise
+
+<Recall id="probability">
+
+A model outputs logits, and softmax turns them into a probability distribution over the vocabulary. The surprise of an outcome is $-\ln p$. <Term id="cross-entropy">Cross-entropy</Term> is the average surprise at what actually happened, and it is lowest when the predicted probabilities match the true frequencies.
+
+</Recall>
+
+<Term id="next-token-prediction">Next-token prediction</Term> uses exactly this loss. For a document of tokens $t_1, \dots, t_n$, the model reads each prefix and is scored on the token that follows:
+
+$$
+\mathcal{L} = -\frac{1}{n}\sum_{i=1}^{n} \ln p_\theta\left(t_{i+1} \mid t_1, \dots, t_i\right)
+$$
+
+<Recall id="transformer">
+
+A transformer carries one running vector per token and, because of the causal mask, each position only ever sees earlier tokens. The final vector at every position is turned into a distribution over the next token.
+
+</Recall>
+
+That structure makes training efficient. One forward pass over a 4,000-token document produces 4,000 predictions at once, each seeing only its own past, so every token of every document is a training example.
+
+<Example title="the sentence in the figure">
+
+The probabilities given to the true next tokens are 0.01, 0.80, 0.04, 0.50, 0.90 and 0.60. The surprises $-\ln p$ are 4.61, 0.22, 3.22, 0.69, 0.11 and 0.51 nats. Their average, **1.56 nats**, is the loss on this sentence.
+
+Notice where the loss comes from. “capital” (4.61) and “France” (3.22) are genuinely hard to predict: many continuations were plausible. “Paris” costs only 0.11, but only for a model that has learned the fact. A model that had not would have spread its probability over many cities and paid perhaps 3 or 4 nats. Across trillions of tokens, those differences are what pushes knowledge into the weights.
+
+</Example>
+
+Good pretraining losses for large models are around 2 nats per token or below, which, as the probability lesson showed, is like choosing among about seven equally likely candidates on average. Loss can never reach zero: much of text is genuinely unpredictable, and cross-entropy bottoms out at the entropy of the text itself.
+
+## What it costs: 6 × N × D
+
+<Recall id="gradient-descent">
+
+Each training step computes the gradient of the loss on a mini-batch and moves every parameter a small step against it. Optimisers such as Adam scale each parameter’s step using a running history of its gradients.
+
+</Recall>
+
+<Recall id="backpropagation">
+
+Backpropagation computes the gradient for every weight in one backward sweep through the network, at about twice the cost of the forward pass.
+
+</Recall>
+
+The forward pass costs about 2 FLOPs per parameter per token. The backward pass costs about twice that, 4 more. So training a model with $N$ parameters on $D$ tokens costs about
+
+$$
+C \approx 6\,N\,D \ \text{FLOPs}.
+$$
+
+<Example title="a frontier-scale run">
+
+A 405-billion-parameter model trained on 15 trillion tokens: $6 \times 405 \times 10^9 \times 15 \times 10^{12} \approx 3.6 \times 10^{25}$ FLOPs.
+
+An H100-class GPU peaks at about $990$ TFLOP/s in <Term id="bf16">BF16</Term>, and large runs typically achieve around 40% of peak (their <Term id="mfu">model FLOPs utilisation</Term>), roughly $4 \times 10^{14}$ FLOP/s. The run needs $3.6 \times 10^{25} / 4 \times 10^{14} \approx 9 \times 10^{10}$ GPU-seconds, about **25 million GPU-hours**. Spread over 16,000 GPUs, that is about **65 days**. Published figures for runs of this size are in the same range.
+
+</Example>
+
+The data side is just as large. Fifteen trillion tokens is roughly 60 terabytes of filtered text, gathered mostly from the public web, then deduplicated and filtered for quality, with code, books, papers and other sources mixed in. Each token is typically seen about once. That is also why pretraining rarely overfits in the sense of <LessonLink id="training-in-practice" />: nearly every batch is fresh data.
+
+## Scaling laws
+
+Train many models of different sizes on different amounts of data and plot the final loss against compute on log-log axes. A striking regularity appears: the best achievable loss falls along a smooth curve, a **power law** in compute, over many orders of magnitude. These <Term id="scaling-laws">scaling laws</Term> are why labs can forecast the loss of a model a hundred times larger than anything they have trained, from small runs.
+
+A widely used form models loss as a floor plus two shrinking penalties, one for too few parameters and one for too little data:
+
+$$
+L(N, D) = E + \frac{A}{N^{\alpha}} + \frac{B}{D^{\beta}}
+$$
+
+$E$ is the irreducible entropy of the text. With a fixed budget $C = 6ND$, making $N$ bigger means making $D$ smaller, so the two penalties trade off, and there is a best split.
+
+<Figure
+  name="scaling-laws"
+  interactive
+  title="Loss against compute, for many model sizes"
+  caption="Each thin curve is one model size trained on more and more tokens; it flattens once the model is too small to absorb more data. The thick curve is the lowest loss reachable at each compute budget. Slide the budget to see which size and data amount achieve it."
+  notice="The best model size rises steadily with compute, and so does the data it needs: roughly 20 tokens per parameter across the range shown (drifting from about 25 to 16). Then turn on the 8B model to see what overtraining costs and buys."
+/>
+
+The 2022 **Chinchilla** study found that parameters and tokens should grow together, each roughly with the square root of compute, at about **20 tokens per parameter**. This was a correction: earlier large models had been made big and trained on too little data. Chinchilla itself (70B parameters, 1.4T tokens, about $5.9 \times 10^{23}$ FLOPs) beat a 280B model trained with slightly less compute on only 300B tokens. With the constants in the figure (a 2024 refit of the Chinchilla data, so treat the exact values as illustrative), the two predicted losses are 1.98 and 2.00 nats, and the smaller model is four times cheaper to run.
+
+Twenty tokens per parameter is the <Term id="compute-optimal">compute-optimal</Term> ratio: it minimises the loss for a given *training* bill. Modern models are deliberately <Term id="overtraining">overtrained</Term>, far past it.
+
+## Reason with it
+
+**Why do labs overtrain small models?** A model is trained once but then serves tokens for its whole life, at about $2N$ FLOPs each. Turn on the 8B marker in the figure. An 8B model trained on 15T tokens (1,875 tokens per parameter) spends $7.2 \times 10^{23}$ FLOPs to reach a predicted loss of 2.02. Under the same fit, a compute-optimal 34B model would reach the same loss for about $1.3 \times 10^{23}$, five and a half times less. But the 34B model costs over four times more per generated token. The extra $5.9 \times 10^{23}$ training FLOPs are repaid after about 11 trillion tokens served, and popular models serve far more than that. When inference dominates, the best model is smaller and trained longer than Chinchilla recommends.
+
+**Why can labs forecast loss, but not capabilities?** Loss is an average over billions of predictions, and averages change smoothly, so the power law holds. A specific skill, such as multi-digit multiplication, is scored as right or wrong on a whole answer. It may stay near zero until the per-token probabilities for every step are high enough, then rise quickly. The underlying improvement is smooth; the threshold makes it look sudden. That is one reason capability “emergence” is debated.
+
+**What happens when high-quality text runs out?** In the formula, a lab stuck at fixed $D$ can only grow $N$, which shrinks the $A$ term while the $B/D^{\beta}$ term stays put, so the loss curve flattens. The escape routes are the ones labs are pursuing: repeating data for a few epochs (which works for a while), generating synthetic data, adding other modalities, and moving effort into training after pretraining.
+
+## Where this picture breaks
+
+- **The constants are not universal.** $E$, $A$, $B$ and the exponents depend on the data mix, the tokenizer and the architecture. Better data shifts the whole curve down; the ~20 tokens per parameter is a rule of thumb, not a law of nature. The figure extrapolates a fit made on models up to about 16B parameters.
+- **Lower loss is not the same as more useful.** Loss is average surprise on the training distribution. A model can gain a little loss by predicting boilerplate better while a rare skill barely moves.
+- **Data order matters.** The landscape picture treats data as one fixed surface. In practice labs change the mix during the run, often finishing on their highest-quality data, and the order affects the result.
+- **A pretrained model is not an assistant.** It continues text, whatever the text is. Asked a question, a <Term id="base-model">base model</Term> may answer, or it may continue with more questions as if it were a forum page. Turning it into an assistant is the work of <Preview id="post-training">post-training</Preview>.
+
+## Why it matters in the feed
+
+When a model card says “trained on 15T tokens”, multiply by 6 and the parameter count to estimate its training compute. Regulations have used <Term id="compute-threshold">compute thresholds</Term> such as $10^{25}$ or $10^{26}$ training FLOPs to decide which models need extra oversight; now you can tell which models cross them. When commentators discuss a “data wall” or synthetic data, they are talking about the $D$ term. And when a lab builds a gigawatt data center, it is buying $C$ for the next point on the curve, the thread picked up in <Preview id="buildout">the economics path</Preview>.
+
+## Recap
+
+- Pretraining minimises **cross-entropy on the next token**, the average surprise from the probability lesson, over trillions of tokens. The text supplies its own labels.
+- The causal transformer scores every position of a document in one pass. Lowering the loss forces the model to learn what the text is about.
+- Training compute is about **6 × parameters × tokens**: 2 for the forward pass, 4 for backpropagation, repeated for each gradient-descent step over every token.
+- Best-achievable loss falls as a **power law** in compute. The compute-optimal split is about 20 tokens per parameter (Chinchilla).
+- Models meant for heavy use are **overtrained** past that ratio, trading extra training compute for cheaper inference.

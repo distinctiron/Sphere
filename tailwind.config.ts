@@ -6,15 +6,28 @@ const config: Config = {
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./lib/**/*.{ts,tsx}",
+    "./content/**/*.{ts,tsx,mdx}",
   ],
   theme: {
   	extend: {
+  		fontFamily: {
+  			sans: ['var(--font-body)', 'system-ui', 'sans-serif'],
+  			hand: ['var(--font-hand)', 'cursive'],
+  			mono: ['var(--font-code)', 'ui-monospace', 'monospace'],
+  			serif: ['var(--font-serif)', 'Georgia', 'serif']
+  		},
   		borderRadius: {
   			lg: 'var(--radius)',
   			md: 'calc(var(--radius) - 2px)',
   			sm: 'calc(var(--radius) - 4px)'
   		},
   		colors: {
+  			ink: '#22252e',
+  			paper: '#fbfaf5',
+  			sheet: '#fffefa',
+  			pencil: '#5b5f6b',
+  			pen: '#d6402b',
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			card: {

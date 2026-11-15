@@ -1,0 +1,176 @@
+---
+id: probability
+title: Probability, softmax & surprise
+summary: Why models output probability distributions instead of answers, how softmax turns alignment scores (logits) into a distribution, what temperature does, and why the standard training loss, cross-entropy, is simply average surprise.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: [vectors]
+related: [neuron, sampling, pretraining]
+keywords: ["softmax", "cross-entropy", "logits", "log-likelihood", "probability distribution", "sampling temperature", "logprobs", "calibration"]
+quiz:
+  - question: A model outputs logits (3, 1, 0) for three words. A bug adds 10 to every logit, giving (13, 11, 10). What happens to the probabilities after softmax?
+    options:
+      - They all rise towards 1
+      - Nothing; they are unchanged
+      - The top word's probability rises, the others fall
+      - They become uniform
+    answer: 1
+    explanation: Softmax only responds to differences between logits. Adding 10 to every score multiplies every exponential by the same factor e¹⁰, which cancels when you divide by the total. The gaps (2 and 1) are unchanged, so every odds ratio and every probability is unchanged.
+  - question: In the training data, the word after some context is “mat” 60% of the time and “floor” 40% of the time. Which prediction gives the lowest average cross-entropy loss on that data?
+    options:
+      - mat 100%, floor 0%, because mat is the most common answer
+      - mat 80%, floor 20%, to lean towards the likelier answer
+      - mat 60%, floor 40%
+      - mat 50%, floor 50%, to be safe
+    answer: 2
+    explanation: Average surprise is 0.673 nats for 60/40, 0.693 for 50/50 and 0.778 for 80/20. Predicting 100/0 gives infinite surprise every time “floor” occurs. Cross-entropy is lowest exactly when the predicted probabilities match the true frequencies, which is why a model trained on it learns to hedge honestly rather than always betting on the favourite.
+  - question: You lower the temperature from 1 to 0.1. Two top candidates have logits 4.0 and 3.9. What happens?
+    options:
+      - The top candidate gets essentially 100%
+      - Both get exactly 50%
+      - The 0.1 gap becomes a gap of 1 after dividing by T, so the top candidate is only about e ≈ 2.7 times as likely as the runner-up
+      - Temperature only affects the lowest-ranked words
+    answer: 2
+    explanation: Temperature divides every logit, so it scales every gap. A gap of 0.1 at T = 1 (odds about 1.1 to 1) becomes a gap of 1 at T = 0.1 (odds e to 1). Considering just these two words, the split is about 73% to 27%. Low temperature sharpens the distribution, but near-ties stay close; only large gaps become near-certainties.
+  - question: A classifier's logit for each class is the dot product of its final hidden vector with that class's direction. If the hidden vector keeps its direction but doubles in length, what happens to the predicted distribution?
+    options:
+      - Nothing, because direction is all that matters
+      - It sharpens, exactly as if the temperature had been halved
+      - It flattens, as if the temperature had been doubled
+      - The top class changes
+    answer: 1
+    explanation: A dot product scales with length, so every logit doubles and every gap between logits doubles. Dividing logits by T = 0.5 does the same thing. The ranking is unchanged (the direction decides which class aligns best), but the length decides how confident the model is. Length acts like an inverse temperature.
+---
+
+Ask a language model to complete "The cat sat on the" and it does not, internally, produce a word. It produces a **number for every word in its vocabulary**, 100,000 or more of them, saying how likely each is to come next. Something outside the model then picks one. The same is true of an image classifier, which outputs a probability for every label.
+
+Why build models this way rather than have them just give an answer? And how do you measure how wrong a set of probabilities was, when the model never committed to anything? This lesson answers both. The answer to the second question, cross-entropy, is the loss that trains essentially every modern language model.
+
+## The picture
+
+In this path's mental model, the model's internal state is a vector pointing somewhere in a high-dimensional space. At the output, **every possible answer has its own direction too**: one vector per word, or one per class. The model's raw score for an answer, its <Term id="logits">logit</Term>, measures how well the internal vector aligns with that answer's direction.
+
+Alignment scores are not yet beliefs. They can be any real number, positive or negative, and they do not add up to anything. **Softmax** turns them into a <Term id="probability-distribution">probability distribution</Term>: a budget of belief, one unit in total, shared out among the candidates. The rule for sharing it is simple and geometric in spirit: **each extra point of logit multiplies an answer's odds by the same factor, e ≈ 2.72.** Only the gaps between scores matter.
+
+A distribution is itself a point. For six candidates it is six non-negative numbers summing to 1, a location somewhere between "all belief on one answer" (a corner) and "belief spread evenly" (the centre). Temperature, which you will meet in the figure, slides that point towards a corner or towards the centre without changing the order of the answers.
+
+<Figure
+  name="softmax-temperature"
+  interactive
+  title="From logits to probabilities, and the surprise of the truth"
+  caption="Six candidate next words with fixed logits. Each logit is divided by the temperature T, then softmax shares out one unit of probability. Pick the word that actually came next: its surprise, −ln p, is read off the curve below, along with the entropy of the whole prediction."
+  notice="At T = 1, mat gets 49% and floor 22%. Lower T and the top word swallows almost everything; raise it and the bars level out. Pick moon at low temperature and the surprise shoots off the chart."
+/>
+
+<KeyIdea>
+
+A model's output layer produces alignment scores (logits). Softmax converts the *differences* between scores into odds, so the output is a distribution that can hedge. The model is then judged by its **surprise** at what actually happened, $-\ln p$. Averaged over data, that surprise is the cross-entropy loss, and it is lowest when the model's probabilities match reality's frequencies.
+
+</KeyIdea>
+
+## Why a model should output a distribution
+
+There are three reasons, and each will come back later in the path.
+
+1. **The world is genuinely uncertain.** After "The cat sat on the", *mat*, *floor* and *sofa* are all fine. A model that must name one answer throws away what it knows about the others. A distribution keeps it.
+2. **A hedge can be scored smoothly.** If the model only named an answer, it would be simply right or wrong, and a slightly better model would look identical to a slightly worse one. With probabilities, moving from 20% to 30% on the right answer is measurable progress. That smooth signal is what makes training by small nudges possible.
+3. **Generation needs choice.** To write text, something must pick a word from the distribution: always the top one, or a random draw that respects the probabilities. <Preview id="sampling">How that choice is made</Preview> shapes how creative or repetitive a model sounds.
+
+## From scores to probabilities: softmax
+
+<Recall id="vectors">
+
+The dot product $\mathbf{a} \cdot \mathbf{b}$ measures alignment: it is large when two vectors point the same way, zero when they are perpendicular and negative when they are opposed. It also scales with the vectors' lengths.
+
+</Recall>
+
+In a classifier's last layer, the logit for class $i$ is typically just such a dot product: $z_i = \mathbf{h} \cdot \mathbf{c}_i$, the model's final hidden vector $\mathbf{h}$ against class $i$'s direction $\mathbf{c}_i$ (plus a bias). A language model does the same with one vector per vocabulary word. Softmax then turns the logits into probabilities:
+
+$$
+p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}
+$$
+
+Read it with the picture in mind:
+- **Exponentiate** makes every score positive, and turns *differences* in score into *ratios* of probability: $\tfrac{p_i}{p_j} = e^{(z_i - z_j)/T}$. At $T = 1$, a lead of one point means $e \approx 2.72$ times as likely; a lead of three points, about 20 times.
+- **Divide by the total** makes the budget sum to 1.
+- **Only gaps matter.** Add the same number to every logit and nothing changes, because the common factor cancels. So a logit on its own means nothing; it is always "how much better aligned than the alternatives".
+- **Temperature $T$** divides every logit, and so scales every gap. Low $T$ stretches gaps: the leader takes almost everything, and as $T \to 0$ softmax becomes "pick the maximum". High $T$ shrinks gaps: the distribution flattens towards uniform.
+
+<Example title="softmax by hand">
+
+Three candidates with logits $(2, 1, 0)$.
+
+| temperature | scores ÷ T | exponentials | probabilities |
+|---|---|---|---|
+| $T = 1$ | 2, 1, 0 | 7.39, 2.72, 1 (sum 11.11) | 0.665, 0.245, 0.090 |
+| $T = 0.5$ | 4, 2, 0 | 54.6, 7.39, 1 (sum 63.0) | 0.867, 0.117, 0.016 |
+| $T = 2$ | 1, 0.5, 0 | 2.72, 1.65, 1 (sum 5.37) | 0.506, 0.307, 0.186 |
+
+Each row keeps the same order; only the confidence changes. And if the logits had been $(102, 101, 100)$, the $T = 1$ row would be identical.
+
+</Example>
+
+There is a geometric reading of temperature too. Because each logit is a dot product, making $\mathbf{h}$ twice as long doubles every logit, which has exactly the same effect as halving $T$. The *direction* of the hidden vector decides which answer it favours; its *length* decides how sure it is. With two classes, softmax reduces to the S-shaped <Preview id="neuron">sigmoid</Preview> function of the gap between the two logits.
+
+## Scoring a prediction: surprise and cross-entropy
+
+Now the second question: the model said *floor* had probability 0.22, and *floor* is what came next. How wrong was it?
+
+The standard answer is **surprise**: $-\ln p$, where $p$ is the probability the model gave to what actually happened.
+
+| probability given to the truth | surprise $-\ln p$ (nats) |
+|---|---|
+| 1 | 0 |
+| 0.9 | 0.11 |
+| 0.5 | 0.69 (exactly 1 bit) |
+| 0.1 | 2.30 |
+| 0.01 | 4.61 |
+| 0.001 | 6.91 |
+
+Surprise is zero for a certain, correct prediction, grows gently as confidence in the truth drops, and grows without limit as $p \to 0$. Being confidently wrong is punished far harder than being unsure. (Using natural logs gives units called nats; with base-2 logs the unit is the bit, and a fair coin flip is exactly 1 bit of surprise.)
+
+Why a logarithm, rather than, say, $1 - p$? Because probabilities of independent events multiply, and logs turn products into sums. The probability a model assigns to a whole 1,000-token document is the product of 1,000 per-token probabilities. If each were 0.5, that product is about $10^{-301}$, too small for most computers to hold. Its log is simply the sum of the per-token logs, $-693$ nats. That sum is the model's <Term id="log-likelihood">log-likelihood</Term> of the document, and a better model has a higher (less negative) one.
+
+<Term id="cross-entropy">Cross-entropy</Term> is the **average surprise per prediction** over a dataset: the average of $-\ln p_{\text{true}}$ over every example or token. It is the loss nearly every classifier and language model is trained to minimise. A related quantity is the <Term id="entropy">entropy</Term> of a distribution: its average surprise about *its own* outcomes. It is 0 when one outcome is certain and largest when all are equally likely ($\ln 6 \approx 1.79$ nats for six options). Entropy measures how uncertain a prediction is; cross-entropy measures how well it matched what happened.
+
+<Example title="why cross-entropy rewards honest hedging">
+
+Suppose that in the training data, after some context, the next word is *mat* 60% of the time and *floor* 40% of the time. Compare predictions by their average surprise over that data:
+
+- **Predict 60 / 40:** $-(0.6 \ln 0.6 + 0.4 \ln 0.4) = 0.673$ nats.
+- **Predict 50 / 50:** $-\ln 0.5 = 0.693$ nats.
+- **Predict 80 / 20:** $-(0.6 \ln 0.8 + 0.4 \ln 0.2) = 0.778$ nats.
+- **Predict 100 / 0:** infinite, because *floor* turns up 40% of the time with probability zero.
+
+The best score is achieved by matching the true frequencies, and it equals the entropy of the truth, 0.673 nats. No model can beat that floor, because some uncertainty is in the data itself. The gap above it measures how far the model's beliefs are from reality.
+
+</Example>
+
+When training nudges a model to lower this loss, the nudge on each logit has a strikingly simple form: raise the true answer's logit in proportion to $1 - p_{\text{true}}$, and lower every other answer's logit in proportion to the probability it received. Probability that was "stolen" by wrong answers gets pushed back. <Preview id="gradient-descent">How those nudges are applied</Preview> is the subject of gradient descent.
+
+## Reason with it
+
+**Why does a model trained with cross-entropy almost never give a plausible word exactly zero probability?** Because zero is catastrophically expensive. If a word the model rated 0 ever appears, the surprise is infinite; even 0.001 costs 6.9 nats. Training pushes every word that has *any* realistic chance of appearing up to a modest probability. This is also why a language model will occasionally produce a strange word when you sample from it: the long tail of small probabilities is real, and it adds up.
+
+**What does a loss of 2.0 nats per token actually mean?** Average surprise of 2 nats is the surprise of picking uniformly among $e^2 \approx 7.4$ options. So on average, the model is about as uncertain about the next token as if it had narrowed the vocabulary to seven or so equally likely candidates. A drop from 2.0 to 1.9 nats looks small, but it means the effective number of candidates falls from about 7.4 to 6.7, on every token. This "effective number of choices", $e^{\text{loss}}$, is what papers report as perplexity.
+
+**Why does lowering the temperature make text more repetitive, and raising it more erratic, without the model's knowledge changing?** Temperature acts after the model has computed its logits, so it cannot add or remove knowledge. It only rescales gaps. Low $T$ turns every lead, however slight, into near-certainty, so the same safe, most-likely continuations win every time. High $T$ flattens the gaps, so the long tail of unlikely words gets sampled far more often than the model believes it should be.
+
+## Where this picture breaks
+
+- **Probability is not truth.** The distribution describes which continuations were likely in the training text, not which statements are true. A popular misconception gets high probability. After <Preview id="post-training">post-training</Preview> for helpfulness, probabilities often stop matching frequencies (reported calibration usually gets worse, typically towards overconfidence), so you cannot read $p$ as a calibrated confidence without checking.
+- **Probability is spread over wordings, not meanings.** "Yes", "Yes." and "Certainly" split the budget for one idea. A low probability on each wording does not mean the model doubts the idea.
+- **Softmax needs a fixed menu.** It can only share belief among answers it has vectors for: the fixed vocabulary or label set. Anything outside it gets no probability at all.
+- **The geometry is simplified.** Real output layers add a bias per answer, and in some language models the "answer directions" are the very same vectors used to read words in. The alignment picture holds, but the details vary by architecture.
+
+## Why it matters in the feed
+
+Model APIs expose this machinery directly: a *temperature* parameter, and often *logprobs*, the log-probabilities of the tokens produced. When a paper reports "lower loss" or "lower perplexity", it is reporting average surprise on held-out text, the central number of <Preview id="pretraining">pretraining</Preview>. When a lab talks about a model being "well calibrated", it means its stated probabilities match how often it is right. And when people explain that a chatbot "just predicts the next word", this lesson is the precise version: it predicts a *distribution* over the next word, trained to minimise its surprise.
+
+## Recap
+
+- Models output probability distributions because the world is uncertain, because hedges can be scored smoothly, and because generation needs something to choose from.
+- Logits are alignment scores: dot products, from the vectors lesson, between the model's final vector and each answer's direction. Softmax turns score *gaps* into odds ratios ($e$ per point) and shares out one unit of probability.
+- Temperature divides the logits: low $T$ sharpens towards the top answer, high $T$ flattens towards uniform, and the ranking never changes. A longer hidden vector acts like a lower temperature.
+- Surprise is $-\ln p$ of what actually happened. Log-likelihood sums it over data; cross-entropy averages it and is the standard training loss.
+- Cross-entropy is minimised by matching true frequencies, and it can never go below the entropy of the data itself.

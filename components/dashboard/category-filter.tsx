@@ -1,9 +1,8 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { X } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { BrushTag } from "@/components/sketch";
 
 interface CategoryFilterProps {
   categories: string[];
@@ -13,11 +12,14 @@ interface CategoryFilterProps {
   className?: string;
 }
 
+/** How many category chips to show before "+N more" */
+const VISIBLE_CHIPS = 10;
+
 /**
  * Category Filter Component
- * 
- * Displays available categories as clickable badges/chips
- * Allows users to filter papers by research field categories
+ *
+ * arXiv categories as paintbrush strokes. With nothing selected every category
+ * is painted (all shown); once some are picked, the others are crossed out in red pen.
  */
 export function CategoryFilter({
   categories,
@@ -26,52 +28,63 @@ export function CategoryFilter({
   onClearFilters,
   className,
 }: CategoryFilterProps) {
+  const [showAll, setShowAll] = useState(false);
+
   if (categories.length === 0) {
     return null;
   }
 
   const hasActiveFilters = selectedCategories.length > 0;
+  // Keep selected categories visible even when the list is collapsed
+  const visible = showAll
+    ? categories
+    : categories.filter((c, i) => i < VISIBLE_CHIPS || selectedCategories.includes(c));
+  const hidden = categories.length - visible.length;
 
   return (
-    <div className={cn("space-y-3", className)}>
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">Filter by Category</h3>
-        {hasActiveFilters && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClearFilters}
-            className="h-7 text-xs"
+    <section aria-label="Filter by category" className={cn("flex flex-wrap items-center gap-x-2.5 gap-y-1", className)}>
+      <span className="mr-2 font-hand text-2xl font-bold">arXiv categories:</span>
+      {visible.map((category, i) => {
+        const isSelected = selectedCategories.includes(category);
+        const painted = !hasActiveFilters || isSelected;
+        return (
+          <button
+            key={category}
+            type="button"
+            className="sk-chip"
+            aria-pressed={isSelected}
+            onClick={() => onCategoryToggle(category)}
           >
-            Clear all
-          </Button>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {categories.map((category) => {
-          const isSelected = selectedCategories.includes(category);
-          return (
-            <Badge
-              key={category}
-              variant={isSelected ? "default" : "outline"}
-              className={cn(
-                "cursor-pointer transition-colors",
-                isSelected && "bg-primary text-primary-foreground"
-              )}
-              onClick={() => onCategoryToggle(category)}
-            >
-              {category}
-              {isSelected && <X className="ml-1 h-3 w-3" />}
-            </Badge>
-          );
-        })}
-      </div>
-      {hasActiveFilters && (
-        <p className="text-xs text-muted-foreground">
-          {selectedCategories.length} categor{selectedCategories.length === 1 ? "y" : "ies"} selected
-        </p>
+            {painted ? (
+              <BrushTag label={category} variant={category} delay={Math.min(i, 8) * 0.08} />
+            ) : (
+              <span className="sk-crossed">{category}</span>
+            )}
+          </button>
+        );
+      })}
+      {hidden > 0 && (
+        <button type="button" className="sk-chip font-hand text-xl font-bold sk-uline" onClick={() => setShowAll(true)}>
+          +{hidden} more
+        </button>
       )}
-    </div>
+      {showAll && categories.length > VISIBLE_CHIPS && (
+        <button type="button" className="sk-chip font-hand text-xl font-bold sk-uline" onClick={() => setShowAll(false)}>
+          show fewer
+        </button>
+      )}
+      {hasActiveFilters ? (
+        <>
+          <span className="ml-2 font-hand text-xl text-pencil">
+            {selectedCategories.length} categor{selectedCategories.length === 1 ? "y" : "ies"} selected
+          </span>
+          <button type="button" className="sk-chip font-hand text-xl font-bold text-pen sk-uline" onClick={onClearFilters}>
+            Clear all
+          </button>
+        </>
+      ) : (
+        <span className="ml-2 font-hand text-xl text-pencil">(tap one to filter)</span>
+      )}
+    </section>
   );
 }
-

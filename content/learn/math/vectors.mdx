@@ -1,0 +1,170 @@
+---
+id: vectors
+title: Vectors & meaning as direction
+summary: How a list of numbers becomes a point and a direction in space, why the dot product measures how much two things point the same way, and why high-dimensional spaces have room for vastly more distinct concepts than they have axes.
+minutes: 11
+model: meaning-is-geometry
+buildsOn: []
+related: [matrices, embeddings, attention]
+keywords: ["vector", "vectors", "dot product", "cosine similarity", "vector database", "vector search", "semantic search", "high-dimensional", "embedding dimension"]
+quiz:
+  - question: Two vectors have a cosine similarity of exactly 1, but one is ten times longer than the other. What does that tell you?
+    options:
+      - They are unrelated, because their lengths differ so much
+      - They point in exactly the same direction and differ only in magnitude
+      - Their dot product must be 1
+      - They are perpendicular
+    answer: 1
+    explanation: Cosine similarity ignores length and keeps only the angle. A cosine of 1 means an angle of zero, so one vector is a stretched copy of the other. Their dot product is not 1; it is the product of their lengths, which is large. This is why search by meaning compares cosines, since a long vector and a short one can say the same thing.
+  - question: You pick two directions at random in a 10,000-dimensional space. What is their cosine similarity most likely to be?
+    options:
+      - Close to 1
+      - Within about ±0.02 of 0
+      - Close to −1
+      - Anywhere between −1 and 1, all equally likely
+    answer: 1
+    explanation: The spread of the cosine between random directions is 1/√d, here 1/100 = 0.01, so almost every pair lands within ±0.02 or so of zero. In high dimensions a random direction shares almost nothing with any other. That is what gives a space with d axes room for far more than d nearly independent concepts.
+  - question: A retrieval system finds that a query and a document have cosine similarity 0.03, using 1,024-dimensional vectors. What is the most reasonable reading?
+    options:
+      - They are strongly related, since the cosine is positive
+      - They are essentially unrelated, since random pairs in 1,024 dimensions typically land about that far from zero
+      - They are opposites
+      - The vectors must be broken, since cosines this small never happen
+    answer: 1
+    explanation: In 1,024 dimensions, random directions have cosines spread by about 1/√1024 ≈ 0.031. A cosine of 0.03 is exactly what an unrelated pair looks like. Whether a similarity is "high" can only be judged against this background level, which shrinks as dimension grows.
+  - question: You rotate every vector in an embedding space by the same rotation. What happens to a search that ranks documents by cosine similarity to a query?
+    options:
+      - The ranking changes completely, because every coordinate changed
+      - Nothing changes, because rotating everything together keeps every angle, and therefore every cosine, the same
+      - Only the top result changes
+      - The search fails, because the axes no longer mean anything
+    answer: 1
+    explanation: A rotation turns the whole space rigidly. All angles and lengths between vectors are kept, so every dot product and cosine is unchanged, even though every individual coordinate is different. So the meaning of the space lies in the relationships between directions, not in the individual axes.
+---
+
+Everything a model reads is first turned into a list of numbers. A word becomes 4,096 numbers, an image patch becomes 1,024, and a whole document can be summarised as 1,536. That sounds like bookkeeping, but it is where the real idea begins. A list of numbers can be read as a **position in space**, and in space, "how similar are these two things?" has a precise, cheap answer: **do they point the same way?**
+
+This lesson builds that picture: vectors as points and directions, the dot product as a measure of alignment, and why spaces with thousands of dimensions are so roomy. When you read about <Term id="vector-database">"vector databases"</Term>, "semantic search" or a model's "hidden size", this is the geometry underneath.
+
+## The picture
+
+A <Term id="vector">vector</Term> is an ordered list of numbers, such as $\mathbf{a} = (3, 1)$. Read it two ways at once:
+
+- **As a point.** Each number is a position along one axis. $(3, 1)$ is 3 steps along the first axis and 1 step along the second.
+- **As an arrow** from the origin to that point. An arrow has a **direction** (which way it points) and a **length** (how far it reaches).
+
+The number of entries is the vector's <Term id="dimension">dimension</Term>: the number of independent axes in its space. Two numbers give a plane you can draw. 4,096 numbers give a space you cannot draw, but the geometry works exactly the same way.
+
+Now the mental model this whole path is built on. **Each concept a model handles is a direction in such a space. Similar concepts point in similar directions. Each axis is room for one more independent way in which concepts can differ.** Asking whether two concepts are related becomes asking about the angle between two arrows.
+
+<Figure
+  name="vector-alignment"
+  interactive
+  title="Alignment is the angle between two arrows"
+  caption="Drag the tips of a and b. The amber bar is a’s shadow along b’s direction, of length |a| cos θ. The dot product is that shadow times the length of b."
+  notice="Try “Longer a”: the dot product grows with length, but cos θ stays the same. Cosine is pure direction; the dot product mixes direction with size."
+/>
+
+<KeyIdea>
+
+A vector is a point and a direction at once. In the meaning-is-geometry picture, **what** a thing is lives in its direction, and similarity is the angle between directions. The dot product measures that alignment with one multiply-and-add per dimension, which is why it sits at the heart of almost every computation in a neural network.
+
+</KeyIdea>
+
+## Measuring alignment: the dot product
+
+The <Term id="dot-product">dot product</Term> of two vectors multiplies them coordinate by coordinate and adds up the results:
+
+$$
+\mathbf{a} \cdot \mathbf{b} = a_1 b_1 + a_2 b_2 + \dots + a_d b_d
+$$
+
+That is the recipe. What it *means* is geometric. The same number also equals
+
+$$
+\mathbf{a} \cdot \mathbf{b} = \|\mathbf{a}\|\,\|\mathbf{b}\| \cos\theta,
+$$
+
+where $\theta$ is the angle between the arrows and $\|\mathbf{a}\|$ is the length, or <Term id="vector-norm">norm</Term>, of $\mathbf{a}$: $\|\mathbf{a}\| = \sqrt{a_1^2 + \dots + a_d^2}$, which is Pythagoras in $d$ dimensions. Read it off the figure: $\|\mathbf{a}\| \cos\theta$ is the length of $\mathbf{a}$'s shadow on $\mathbf{b}$'s direction (the amber bar), so the dot product is *how far $\mathbf{a}$ reaches along $\mathbf{b}$, scaled by how long $\mathbf{b}$ is*. It is large and positive when they point the same way, zero at a right angle, and negative when they point against each other.
+
+Two vectors whose dot product is zero are <Term id="orthogonal">orthogonal</Term>: at right angles, sharing no component at all. Moving along one tells you nothing about the other.
+
+The dot product mixes two things: direction and length. Often you want only the direction. Divide out both lengths and you get the <Term id="cosine-similarity">cosine similarity</Term>:
+
+$$
+\cos\theta = \frac{\mathbf{a} \cdot \mathbf{b}}{\|\mathbf{a}\|\,\|\mathbf{b}\|}
+$$
+
+It always lies between −1 (opposite) and 1 (same direction), with 0 for perpendicular, whatever the lengths. In a trained model, length tends to carry things like emphasis, frequency or confidence, while direction carries *what* something is. Cosine keeps only the what.
+
+<Example title="three words as 3-D vectors">
+
+Suppose, just for illustration, that three axes loosely track "animal", "machine" and "household". Give three words these vectors:
+
+| word | vector | length |
+|---|---|---|
+| cat | $(4, 0, 3)$ | $\sqrt{16 + 9} = 5$ |
+| dog | $(4, 0, 2)$ | $\sqrt{20} \approx 4.47$ |
+| car | $(0, 5, 1)$ | $\sqrt{26} \approx 5.10$ |
+
+- cat · dog $= 16 + 0 + 6 = 22$, so $\cos\theta = 22 / (5 \times 4.47) \approx 0.98$: nearly the same direction.
+- cat · car $= 0 + 0 + 3 = 3$, so $\cos\theta = 3 / (5 \times 5.10) \approx 0.12$: nearly perpendicular. They share only a little "household".
+
+Now take kitten $= (2, 0, 1.5)$, exactly half of cat. Its cosine with cat is exactly 1, and its dot product with dog is $8 + 3 = 11$, exactly half of 22. The dot product halved because the arrow got shorter; the cosine did not change because the direction did not.
+
+</Example>
+
+## Dimensions as axes of nuance
+
+Here is the picture in its most useful form. Think of a language as a vector space where concepts are vectors and similarity is the direction they point. "Walk", "stroll", "march" and "trudge" point in nearly the same direction: they all mean moving on foot. They differ along other axes: speed, mood, purpose, effort. Each independent axis is one more way in which two concepts can differ while staying close in every other respect.
+
+This lets you reason. **A space with more dimensions can hold finer distinctions.** In two dimensions, "stroll" and "trudge" would have to collapse onto almost the same arrow, because there is no spare axis to separate them. In a thousand dimensions there is room for "slow", "reluctant" and "tired" to each tilt the arrow a little, independently. A language, or a model, with more axes of nuance can say more precise things. This is also why a model's *hidden size* matters: it is the number of axes each internal representation has to work with.
+
+The picture needs three honest corrections before you lean on it.
+
+- **The axes do not come labelled.** Our "animal" and "machine" axes were invented for the example. In a trained model, individual coordinates rarely mean anything on their own. Rotate the whole space rigidly and every angle and length stays the same, so every dot product stays the same, and the model would work just as well. Meaning lives in the directions relative to each other, and a "feature" such as speed is usually a direction pointing *between* the axes, not an axis itself.
+- **"A language has more dimensions" is a statement about distinctions, not about a literal count.** Nobody can measure the dimension of French. What transfers is the logic: the number of independent ways a representation can vary limits how many shades it can keep apart.
+- **Opposite meaning is not opposite direction.** Models learn directions from how words are used, and "hot" and "cold" are used in very similar sentences. Their vectors usually point in *similar* directions, differing along a narrower temperature direction. Similar direction means "used in similar contexts", which is close to, but not the same as, "means the same".
+
+## Room in high dimensions
+
+The last correction to the "axes of nuance" idea is the most surprising, and it runs in the generous direction. A space with $d$ axes holds at most $d$ directions that are *exactly* perpendicular to each other. But it holds vastly more that are *nearly* perpendicular.
+
+<Figure
+  name="random-directions"
+  interactive
+  title="Random directions are nearly perpendicular in high dimensions"
+  caption="Each bar counts how many of 300 random pairs of directions have a given cosine. The dashed amber lines mark ±1/√d, the typical spread. The green band is ‘within 0.1 of perpendicular’."
+  notice="In 2 dimensions random pairs are often nearly aligned or opposed. By 1,000 dimensions almost every pair is within a few hundredths of perpendicular."
+/>
+
+Pick two directions at random in $d$ dimensions and their cosine clusters around zero, with a typical spread of exactly $1/\sqrt{d}$. In 2-D that spread is 0.71, so random arrows often line up. In 4,096 dimensions it is $1/64 \approx 0.016$. Almost any two random directions are within a couple of degrees of 90°.
+
+The consequence for meaning is large. Fix what "nearly independent" means, say a cosine between −0.1 and 0.1 (the green band). The number of directions you can fit that are all nearly independent of each other then grows **exponentially** with $d$, not linearly. Even simply drawing directions at random in 4,096 dimensions, you can expect to fit on the order of a hundred thousand before any pair strays outside the band, and deliberate arrangements do better. A model with 4,096 dimensions does not have room for just 4,096 concepts. It has room for far more, each a direction that barely interferes with the others. There is evidence that trained models exploit this by packing many more features than they have dimensions, a phenomenon called superposition; <Preview id="embeddings">how word vectors are learned and used</Preview> picks this up.
+
+## Reason with it
+
+**Why does search by meaning compare cosines instead of raw dot products?** The dot product rewards length as well as alignment. A long vector, perhaps for a document with many strong signals, would score well against almost everything it points loosely towards. Dividing by the lengths keeps only direction, the part that encodes *what* the text is about. Many systems normalise every vector to length 1 up front, after which the dot product *is* the cosine and costs one multiply-add per dimension.
+
+**Is a cosine of 0.3 high?** Only against a background. Among random directions in 1,024 dimensions, cosines spread by about $1/\sqrt{1024} \approx 0.03$, so 0.3 is about ten spreads away from chance: a strong signal. The same 0.3 in three dimensions would be unremarkable. Similarity scores from different embedding models, with different dimensions and training, are therefore not directly comparable.
+
+**Why does a bigger embedding dimension help, and when does it stop helping?** More axes mean more independent ways to vary, so distinctions that would otherwise collide can be kept apart. But the space is only useful if the data actually contains those distinctions and the model can learn them. Once there is room for every distinction the data supports, extra dimensions add cost (every dot product gets longer) without adding nuance. And because of near-orthogonality, even moderate dimensions already hold a great deal, so returns diminish well before the dimension matches the number of concepts.
+
+## Where this picture breaks
+
+- **Two dimensions mislead about thousands.** The first figure is a plane, where random arrows are often aligned. In a model's space the default is near-perpendicular, and "close" means a small but real tilt. Use the figure for what the dot product *is*, and the second figure for what high-dimensional space *feels like*.
+- **Real embedding spaces are lopsided.** Trained vectors often share a common direction, so that even unrelated items have cosines well above zero. Practical systems sometimes subtract the average vector first. The idea that "unrelated means about 0" holds for a well-centred space, not automatically.
+- **Direction is not the only carrier of meaning.** Length, and position relative to other points, matter too. And a vector's meaning depends on the model that produced it: vectors from two different models live in different spaces and cannot be compared directly.
+- **Nothing here says how the directions are chosen.** We placed cat and dog by hand. Real models *learn* the directions from data, and they transform them layer by layer, which is where <LessonLink id="matrices" /> comes in.
+
+## Why it matters in the feed
+
+When a company launches a "vector database" or an embedding model "with 3,072 dimensions", it is selling this geometry: text turned into directions, and search turned into finding the nearest angles. When a paper reports that a model "represents truthfulness as a direction", or that researchers "steered" a model by adding a vector to its internal state, they are using the idea that concepts are directions. And when you see a model's hidden size, read it as the number of axes of nuance each internal representation has, bearing in mind that near-orthogonality lets it hold far more concepts than that.
+
+## Recap
+
+- A vector is an ordered list of numbers, read as a point and as an arrow with a direction and a length. Its dimension is the number of independent axes.
+- The dot product, the sum of coordinate-wise products, equals $\|\mathbf{a}\|\|\mathbf{b}\|\cos\theta$: how far one vector reaches along the other. Cosine similarity keeps only the angle.
+- In the meaning-is-geometry picture, concepts are directions, similarity is angle, and dimensions are axes of nuance. The axes themselves carry no fixed labels; only relationships between directions do.
+- In high dimensions, random directions are nearly perpendicular (spread $1/\sqrt{d}$), so a space holds far more nearly independent concepts than it has axes.
+- Next, matrices: how a model transforms this whole space at once.

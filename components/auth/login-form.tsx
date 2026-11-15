@@ -8,14 +8,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
   Form,
   FormControl,
   FormField,
@@ -24,6 +16,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { AuthCard, AuthNotice, HandLink, OAuthButton, OrDivider, penMessage } from "@/components/auth/auth-shell";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -38,7 +31,7 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Check for registration or password reset success messages
+  // Check for registration, password reset, or OAuth error messages
   useEffect(() => {
     if (searchParams.get("registered") === "true") {
       // Registration was successful, user can now log in
@@ -47,6 +40,31 @@ export function LoginForm() {
     if (searchParams.get("reset") === "success") {
       // Password reset was successful
       // We'll show a success message in the form
+    }
+    // Handle OAuth errors
+    const oauthError = searchParams.get("error");
+    if (oauthError) {
+      let errorMessage = "Authentication failed. Please try again.";
+      if (oauthError === "OAuthSignin") {
+        errorMessage = "Error initiating OAuth sign-in. Please try again.";
+      } else if (oauthError === "OAuthCallback") {
+        errorMessage = "Error processing OAuth callback. Please try again.";
+      } else if (oauthError === "OAuthCreateAccount") {
+        errorMessage = "Could not create account. Please try again.";
+      } else if (oauthError === "EmailCreateAccount") {
+        errorMessage = "Could not create account with this email. Please try again.";
+      } else if (oauthError === "Callback") {
+        errorMessage = "Error in OAuth callback. Please try again.";
+      } else if (oauthError === "OAuthAccountNotLinked") {
+        errorMessage = "This account is already linked to another email. Please sign in with your original method.";
+      } else if (oauthError === "EmailSignin") {
+        errorMessage = "Error sending email. Please try again.";
+      } else if (oauthError === "CredentialsSignin") {
+        errorMessage = "Invalid credentials. Please check your email and password.";
+      } else if (oauthError === "SessionRequired") {
+        errorMessage = "Please sign in to access this page.";
+      }
+      setError(errorMessage);
     }
   }, [searchParams]);
 
@@ -103,42 +121,57 @@ export function LoginForm() {
     }
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Sign in</CardTitle>
-        <CardDescription>
-          Enter your email and password to access your account
-        </CardDescription>
-      </CardHeader>
-      <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)}>
-          <CardContent className="space-y-4">
-            {searchParams.get("reset") === "success" && (
-              <div className="rounded-md bg-green-500/15 p-3 text-sm text-green-700 dark:text-green-400">
-                Password reset successful. Please log in with your new password.
-              </div>
-            )}
-            {error && (
-              <div className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                {error}
-              </div>
-            )}
+  const oauth = (provider: "google" | "apple" | "facebook", name: string) => async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      await signIn(provider, { callbackUrl: "/dashboard", redirect: true });
+    } catch (err) {
+      setError(`Failed to initiate ${name} sign-in. Please try again.`);
+      setIsLoading(false);
+    }
+  };
 
+  return (
+    <>
+      {searchParams.get("reset") === "success" && (
+        <AuthNotice tone="success" seed="login-reset-note">
+          Password reset successful. Please log in with your new password.
+        </AuthNotice>
+      )}
+      <AuthCard
+        seed="login-card"
+        titleId="signin-h"
+        title="Sign in"
+        subtitle="Enter your email and password to access your account"
+      >
+        {error && (
+          <AuthNotice tone="error" seed="login-error">
+            {error}
+          </AuthNotice>
+        )}
+
+        {/* OAuth Providers */}
+        <div className="flex flex-col gap-3">
+          <OAuthButton letter="G" label="Sign in with Google" seed="login-google" onClick={oauth("google", "Google")} disabled={isLoading} />
+          <OAuthButton letter="A" label="Sign in with Apple" seed="login-apple" onClick={oauth("apple", "Apple")} disabled={isLoading} />
+          <OAuthButton letter="F" label="Sign in with Facebook" seed="login-facebook" onClick={oauth("facebook", "Facebook")} disabled={isLoading} />
+        </div>
+
+        <OrDivider label="Or continue with email" seed="login-or" />
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
             <FormField
               control={form.control}
               name="email"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Email</FormLabel>
+                <FormItem className="space-y-0">
+                  <FormLabel className="mb-1 block">Email</FormLabel>
                   <FormControl>
-                    <Input
-                      type="email"
-                      placeholder="you@example.com"
-                      {...field}
-                    />
+                    <Input type="email" placeholder="you@example.com" autoComplete="email" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className={penMessage} />
                 </FormItem>
               )}
             />
@@ -147,43 +180,31 @@ export function LoginForm() {
               control={form.control}
               name="password"
               render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Password</FormLabel>
+                <FormItem className="space-y-0">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <FormLabel className="mb-1 block">Password</FormLabel>
+                    <a href="/forgot-password" className="font-hand text-[20px]">
+                      Forgot password?
+                    </a>
+                  </div>
                   <FormControl>
-                    <Input type="password" {...field} />
+                    <Input type="password" autoComplete="current-password" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className={penMessage} />
                 </FormItem>
               )}
             />
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
+
+            <Button type="submit" className="mt-1 w-full" disabled={isLoading}>
               {isLoading ? "Signing in..." : "Sign in"}
             </Button>
-            <div className="text-center text-sm text-muted-foreground space-y-2">
-              <div>
-                <a
-                  href="/forgot-password"
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  Forgot password?
-                </a>
-              </div>
-              <div>
-                Don&apos;t have an account?{" "}
-                <a
-                  href="/register"
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  Sign up
-                </a>
-              </div>
-            </div>
-          </CardFooter>
-        </form>
-      </Form>
-    </Card>
+          </form>
+        </Form>
+
+        <p className="m-0 mt-1 text-center">
+          Don&apos;t have an account? <HandLink href="/register">Sign up</HandLink>
+        </p>
+      </AuthCard>
+    </>
   );
 }
-

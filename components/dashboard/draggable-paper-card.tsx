@@ -3,7 +3,7 @@
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { PaperListCard } from "./paper-list-card";
-import { GripVertical } from "lucide-react";
+import { DragHandleMark } from "./drag-handle-mark";
 
 interface DraggablePaperCardProps {
   paper: {
@@ -28,6 +28,7 @@ interface DraggablePaperCardProps {
   onViewPaper?: (paperId: string) => void;
   onAddToLibrary?: (paperId: string) => Promise<void>;
   onDismiss?: (paperId: string) => Promise<void>;
+  onScore?: (paperId: string) => Promise<void>;
 }
 
 export function DraggablePaperCard({
@@ -35,6 +36,7 @@ export function DraggablePaperCard({
   onViewPaper,
   onAddToLibrary,
   onDismiss,
+  onScore,
 }: DraggablePaperCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -52,9 +54,10 @@ export function DraggablePaperCard({
       <div
         {...attributes}
         {...listeners}
-        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full pr-2 cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        className="absolute left-0 top-1/2 z-10 -translate-x-full -translate-y-1/2 cursor-grab pr-1 text-pencil opacity-0 transition-opacity hover:text-ink focus-visible:opacity-100 active:cursor-grabbing group-hover:opacity-100"
+        aria-label="Drag to move"
       >
-        <GripVertical className="w-4 h-4 text-slate-400" />
+        <DragHandleMark />
       </div>
       <PaperListCard
         paper={{
@@ -65,6 +68,7 @@ export function DraggablePaperCard({
         isInLibrary={paper.inLibrary}
         onAddToLibrary={onAddToLibrary}
         onDismiss={onDismiss}
+        onScore={onScore}
       />
     </div>
   );

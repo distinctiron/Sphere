@@ -1,0 +1,179 @@
+---
+id: serving-at-scale
+title: Serving at scale
+summary: The techniques that let one GPU serve thousands of users. Continuous batching, paged KV caches, prefix caching, quantisation, speculative decoding, mixture-of-experts serving and split prefill and decode all get more tokens out of each byte moved or each GPU-second.
+minutes: 12
+model: feeding-the-math
+buildsOn: [inference, accelerators]
+related: [distributed-training, hosting, unit-economics, memory-wall, agent-loop]
+keywords: ["vLLM", "SGLang", "continuous batching", "PagedAttention", "speculative decoding", "quantization", "prefix caching", "mixture of experts", "disaggregated serving", "inference throughput"]
+quiz:
+  - question: A server uses static batching, starting four requests together and taking new ones only when all four have finished. Why does switching to continuous batching raise throughput even though the model and hardware are the same?
+    options:
+      - Continuous batching runs the model at a higher clock speed
+      - With static batching, slots whose requests finished early sit idle until the longest request ends; continuous batching refills each slot on the next step, so every pass over the weights serves a full batch
+      - Continuous batching skips the prefill
+      - It uses a smaller KV cache per token
+    answer: 1
+    explanation: Decode cost per step is dominated by streaming the weights, which is the same whether the batch has one live sequence or four. Output lengths vary a lot, so a static batch spends many steps with most slots empty. Scheduling at every step keeps the batch full, and the same weight reads produce more tokens.
+  - question: Before paged KV caches, servers often reserved enough contiguous memory for each request's maximum possible length. What was the main cost?
+    options:
+      - Slower attention arithmetic
+      - Most reserved memory sat empty because most requests end far short of the maximum, so far fewer sequences fit and batches, and therefore throughput, were much smaller
+      - Higher prefill latency
+      - It prevented quantisation
+    answer: 1
+    explanation: Throughput in decode rises with the number of sequences sharing each pass over the weights, and that number is limited by how many KV caches fit in HBM. Reserving for the worst case wastes most of that memory. Allocating small blocks on demand lets memory match the actual lengths, so two to four times more sequences can fit.
+  - question: In speculative decoding, the large model checks four drafted tokens in a single forward pass. Why does that pass cost about the same time as generating one token normally?
+    options:
+      - Because the large model skips half its layers
+      - Because decode is memory-bound. The pass is dominated by streaming the weights once, and scoring four positions instead of one adds arithmetic the idle compute units absorb
+      - Because the drafted tokens are already cached
+      - It does not; it costs four times as much
+    answer: 1
+    explanation: At small batch sizes a decode step sits far below the ridge point, so the arithmetic units mostly wait for weights. Checking several positions reuses each weight several times, like a tiny prefill, at almost no extra time. If most drafts are accepted, several tokens come out of one expensive pass.
+  - question: A mixture-of-experts model has 671B total parameters, of which 37B are used for each token. Which statement about serving it is right?
+    options:
+      - It needs memory for about 37B parameters and reads 671B per token
+      - It needs memory for all 671B parameters, but each token only reads the experts it uses, about 37B, so per-token bandwidth and compute are like a 37B model's
+      - It behaves exactly like a 37B dense model in every way
+      - It behaves exactly like a 671B dense model in every way
+    answer: 1
+    explanation: Every expert must be resident because any token may be routed to it, so capacity is set by the total. Each token passes through only a few experts, so bytes read and FLOPs per token follow the active count. That is why such models are cheap per token at scale, but need many GPUs, and large batches so that every expert gets enough tokens per pass.
+---
+
+A large AI provider generates enormous numbers of tokens a day across millions of users, and the price of a given level of capability has fallen steeply year after year. Part of that comes from better chips. Much of it comes from serving software. The same GPU running a naive loop and running a modern inference engine can differ in throughput by an order of magnitude.
+
+None of the techniques involved is magic. Each follows from the path's picture, and from what you already know about prefill and decode.
+
+## The picture
+
+<Recall id="inference">
+
+Prefill reads the whole prompt at once and is compute-bound. Decode generates one token per sequence per step and is memory-bound. Each step streams all the weights plus every active sequence's KV cache. The arithmetic intensity of a decode step is about the batch size, so throughput rises almost linearly with the number of sequences sharing each pass, until memory fills or the step becomes compute-bound.
+
+</Recall>
+
+A serving system is a scheduler for one scarce resource: **HBM**. Its bandwidth sets how long each step takes; its capacity sets how many sequences' KV caches can share a step. Almost every serving technique does one of three things:
+- **Share each pass over the weights among more tokens** (bigger, fuller batches).
+- **Move fewer bytes** per token (smaller numbers, less wasted memory, reused caches).
+- **Take fewer expensive passes** per token (guess ahead and verify, or read only part of the model).
+
+These are all ways of getting more tokens per byte moved or per GPU-second. Users care about latency, too. The main measures are <Term id="ttft">time to first token</Term> and <Term id="tpot">time per output token</Term>, and providers commit to targets for both. A bigger batch raises total throughput but makes each step slower for everyone in it. Serving is about getting the most throughput that still meets the latency target, sometimes called goodput.
+
+<KeyIdea>
+
+Every serving trick is a way to get more tokens out of each byte moved from HBM or each GPU-second, without breaking the latency users were promised. Batching shares the weight reads; paging and quantisation shrink the bytes; speculation and sparsity cut the expensive passes.
+
+</KeyIdea>
+
+## Keep the batch full: continuous batching
+
+Requests arrive at random times and produce outputs of very different lengths: a one-line answer and a 2,000-token essay may share a batch. With **static batching**, a batch starts together and ends when its longest member ends, so the slots of short requests sit empty for most of the batch.
+
+<Term id="continuous-batching">Continuous batching</Term> (also called iteration-level scheduling) makes the scheduling decision at *every* decode step. When a sequence finishes, a waiting request takes its slot on the next step.
+
+<Figure
+  name="continuous-batching"
+  title="Static versus continuous batching"
+  caption="Four batch slots over 24 decode steps, serving the same queue of requests with varied output lengths. Top: each batch waits for its longest request. Bottom: a slot is refilled as soon as its request finishes."
+  notice="The idle stripes in the top timeline. Each is a slot that paid for a full pass over the weights and produced nothing."
+/>
+
+New requests need prefill, which is compute-heavy and could stall everyone's stream for a moment. So servers use <Term id="chunked-prefill">chunked prefill</Term>: a long prompt is split into pieces that ride along with ordinary decode steps. The compute-bound prefill work then fills the arithmetic units that memory-bound decode leaves idle.
+
+## Waste no memory: paged KV caches and prefix reuse
+
+The number of sequences in a batch is limited by how many KV caches fit in HBM. Early servers reserved one contiguous region per request, sized for the longest output it might produce. Most requests end far shorter, so most of that memory sat empty. The vLLM project's analysis found that 60–80% of KV memory was wasted this way.
+
+<Term id="paged-attention">Paged attention</Term>, introduced by vLLM in 2023, borrows virtual memory from operating systems. The cache is split into small fixed-size blocks (say, 16 tokens each), handed out one at a time as a sequence grows, from anywhere in memory. A per-sequence block table tells the attention kernel where each block lives.
+
+<Figure
+  name="paged-kv"
+  static
+  title="Reserving the maximum versus paging"
+  caption="The same 48 blocks of KV-cache memory. Left: each sequence reserves room for the longest allowed output. Right: blocks are allocated on demand and tracked by a block table."
+  notice="Same memory, twice the sequences, with room left over. In decode, more sequences per step means more tokens per pass over the weights."
+/>
+
+<Example title="an 8B model on one H100">
+
+The model's BF16 weights take 16 GB, leaving about 64 GB for KV cache at 0.13 MB per token. Suppose users' contexts average 4,000 tokens, but the service allows up to 32,000.
+
+- **Reserve the maximum:** 32,000 × 0.13 MB ≈ 4.2 GB per sequence, so only **15** sequences fit. Each step reads 16 GB of weights plus 15 × 4,000 tokens of cache (7.9 GB), about 24 GB in 7.1 ms: about **2,100 tokens/s**.
+- **Paged:** each sequence occupies only what it uses, 0.52 GB, so 64 sequences fit with room to spare. Each step reads 16 + 33.6 ≈ 50 GB in 14.8 ms: about **4,300 tokens/s**.
+- **Paged, plus FP8 weights and FP8 KV cache:** 8 + 16.8 ≈ 25 GB per step, 7.4 ms: about **8,600 tokens/s** for the same 64 users.
+
+Idealised, as in the inference calculator; real engines reach a fraction of these ceilings, but the ratios hold.
+
+</Example>
+
+Blocks can also be **shared**. Many requests begin with the same system prompt, tool definitions or document. Their keys and values depend only on that prefix, so a server can compute them once and point many sequences' block tables at the same blocks. This is <Term id="prompt-caching">prefix caching</Term>, which providers pass on as discounted "cached input" prices. It matters most for agents, which resend a growing conversation on every step of their loop.
+
+## Move fewer bytes: quantisation
+
+<Recall id="accelerators">
+
+Halving the bits per number halves the bytes to move and store, and roughly doubles the arithmetic a chip can do. FP8 and block-scaled 4-bit formats trade precision for that gain.
+
+</Recall>
+
+<Term id="quantization">Quantisation</Term> for serving converts a trained model's weights, and often its KV cache, to 8 or 4 bits. For memory-bound decode, bytes are time, so 8-bit weights nearly double single-user speed and free memory for bigger batches. Common methods pick the scale for each small group of weights carefully, to limit the error where it matters most. The cost is accuracy: 8-bit is usually close to lossless, while 4-bit can lose quality on hard tasks, so it has to be checked with evaluations, not assumed.
+
+## Take fewer passes: speculative decoding
+
+Decode is slow because each token needs its own pass over the weights. <Term id="speculative-decoding">Speculative decoding</Term> gets several tokens from one pass. A small, fast **draft** model (or extra prediction heads on the main model) guesses the next few tokens. The large model then processes all the guesses in a single forward pass, which, as in prefill, reuses each weight across several positions. It keeps the longest run of guesses that match what it would have produced, then adds one token of its own.
+
+<Figure
+  name="speculative-decoding"
+  title="Draft, then verify in one pass"
+  caption="A small model drafts four tokens. The large model scores all four positions in a single pass, accepts the three that match its own predictions, and replaces the fourth with its own choice."
+  notice="The expensive model ran once and four tokens came out. With a verification rule based on the two models' probabilities, the output has exactly the distribution the large model alone would produce."
+/>
+
+Because the verification pass is memory-bound, checking $k$ drafts costs about the same as generating one token. If each draft token is accepted with probability $\alpha$, one pass yields on average
+
+$$
+\frac{1 - \alpha^{k+1}}{1 - \alpha}
+$$
+
+tokens. With $\alpha = 0.8$ and $k = 4$ that is about **3.4 tokens per pass**. Speed-ups of two to three times are typical in practice, because the draft itself costs time and acceptance varies with the text.
+
+## Split the model and the work
+
+<Recall id="distributed-training">
+
+Large models are split across GPUs by tensor, pipeline and expert parallelism. Traffic between GPUs follows a link hierarchy: NVLink inside a server or rack, and a roughly ten times slower network across the cluster.
+
+</Recall>
+
+**Mixture-of-experts serving.** A <Term id="mixture-of-experts">mixture-of-experts</Term> model routes each token through a few of many expert blocks. DeepSeek-V3, for example, has 671B parameters in total but uses about 37B per token. Memory must hold all 671B, since any token may need any expert. Bandwidth and compute per token follow the 37B. So these models are spread across many GPUs, with each GPU holding some of the experts (expert parallelism, as in distributed training), and tokens shuffled to the right GPU in every layer. They also need big batches. With 8 of 256 experts active per token, each expert sees only about 1/32 of the batch, so it takes roughly ten thousand tokens per step for each expert to get a few hundred, near the ridge point. DeepSeek's V3 technical report, for example, described a minimum decode deployment of 320 GPUs (40 servers).
+
+**Disaggregated prefill and decode.** Prefill is compute-bound and bursty; decode is memory-bound and steady. On the same GPUs, a burst of long prompts slows every user's stream. <Term id="disaggregated-serving">Disaggregated serving</Term> runs them on separate pools and ships each request's KV cache from the prefill pool to the decode pool over the network. For a 70B model at 0.33 MB per token, an 8,000-token prompt's cache is about 2.6 GB, about 50 ms at 50 GB/s. That is worth paying for steadier streams and for sizing each pool for its own bottleneck.
+
+## Reason with it
+
+**Why is a "batch API" with a 24-hour deadline half the price?** Without a latency target, the provider can run enormous batches when demand is low. With each pass over the weights shared among hundreds of sequences, decode approaches the ridge point, and the cost per token falls. You are paying for the latency you do not need.
+
+**Why does speculative decoding help most for one user on a local GPU, and least on a busy server?** Speculation spends spare arithmetic to save weight reads. A single-user decode step leaves nearly all arithmetic idle, so verification is almost free. A server running large batches is already near the ridge point: extra positions compete for compute that is in use, and the gain shrinks.
+
+**Why do very large mixture-of-experts models make more sense for a big provider than for someone at home?** At home, memory is the binding constraint: all the experts must fit, even though each token uses a few. A provider has hundreds of GPUs' worth of HBM and enough traffic to keep every expert busy, so it gets the low per-token cost of the active parameters while the total capacity is spread across the cluster.
+
+## Where this picture breaks
+
+- **The techniques interact.** Speculation lowers the batch size a server can afford; quantisation changes where the ridge is; paging adds a lookup to attention. Real engines tune them together for a workload, and published gains rarely add up.
+- **Workloads differ.** Long prompts and short answers (retrieval, agents) favour prefix caching and prefill capacity. Short prompts and long outputs (<Term id="reasoning-model">reasoning models</Term>) favour decode tricks. There is no single best configuration.
+- **Quality is part of the budget.** Quantisation and some draft methods can shift outputs slightly. Providers that serve the "same" model with different settings can give measurably different results.
+- **Networks matter.** Expert parallelism and disaggregation move activations and caches between GPUs, bringing back the communication wall from distributed training.
+
+## Why it matters in the feed
+
+When a lab announces a price cut with no new chips, look for these techniques: a new serving engine, FP8 or FP4 inference, speculative decoding with built-in draft heads. When the release notes of an open-source engine such as vLLM or SGLang announce "prefill–decode disaggregation" or "expert parallelism", it is adding the architecture-level tricks here. And when API price sheets list separate prices for cached input and batch jobs, they are pricing prefix reuse and relaxed latency.
+
+## Recap
+
+- Serving is scheduling HBM: **bandwidth** sets step time, **capacity** sets how many sequences share a step. As in inference, decode's intensity is about the batch size.
+- **Continuous batching** keeps every slot busy; **chunked prefill** fills idle arithmetic with prompt work.
+- **Paged KV caches** stop reserved-but-empty memory, fitting several times more sequences. **Prefix caching** shares the cache of repeated prompts.
+- **Quantisation** shrinks the bytes, the accelerator lesson's halving of bits applied to serving. **Speculative decoding** gets several tokens per expensive pass.
+- **Mixture-of-experts** models need memory for all parameters but bandwidth only for the active ones, and **disaggregation** separates compute-bound prefill from memory-bound decode.

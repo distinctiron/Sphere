@@ -1,0 +1,144 @@
+---
+id: export-controls
+title: Export controls and the chip war
+summary: How the US and its allies have used chokepoints in chips, tools and memory to slow China's AI progress since 2022, how China routes around them and answers with its own controls, and how to judge whether a rule works. Controls buy time; the target pays for the detour.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [semiconductors]
+related: [value-chain, inference, buildout, accelerators, sovereign-ai, national-security]
+keywords: ["export controls", "chip export", "Entity List", "BIS", "Huawei Ascend", "SMIC", "H20", "rare earths", "gallium", "AI diffusion rule"]
+reviewed: 2026-09-29
+quiz:
+  - question: A rule caps the compute performance of chips sold to China. The vendor responds with a chip that has modest compute but very high memory bandwidth. Using the inference lesson, why is that chip still valuable?
+    options:
+      - It is not valuable, since compute is what matters for AI
+      - Generating tokens (decode) is memory-bound, so a chip with high bandwidth serves models well even with capped compute
+      - High-bandwidth chips train models faster than any other kind
+      - Memory bandwidth is not covered by any physical limit
+    answer: 1
+    explanation: Decode streams all the weights for each step, so its speed follows memory bandwidth, not peak FLOP/s. A chip under a compute threshold but with plenty of HBM bandwidth can be excellent for inference. Rules that measure only compute leave that route open, which is why later rules also targeted memory.
+  - question: China has abundant electricity but limited access to the best chips. What is the most natural way for it to route around the controls, according to the bottleneck picture?
+    options:
+      - Buy fewer chips and train smaller models only
+      - Use more of its own, less efficient chips in larger systems, paying for the detour in power, which it has, until chip yields or memory supply bind
+      - Stop training models
+      - Use CPUs instead of accelerators
+    answer: 1
+    explanation: A detour costs something; the target chooses to pay in the input it has most of. Huawei's large rack-scale systems deliver more total compute than a leading rack by using many more chips and several times the power. That works where power is cheap and plentiful. The next limits are how many good chips its fabs can yield and how much HBM it can get.
+  - question: Which outcome would critics of export controls point to as a cost to the country imposing them?
+    options:
+      - The target's AI labs stop publishing research
+      - Lost sales that would fund the controlling country's own research, and a strong incentive for the target to build domestic substitutes that erode future leverage
+      - Chip prices fall worldwide
+      - Allies gain market share in the target country with no downside
+    answer: 1
+    explanation: A control denies a market to domestic firms and makes the target invest in routing around the chokepoint. Each successful substitute becomes a permanent reduction in leverage. Supporters answer that the time bought is worth it; the debate is about how much time, at what cost.
+  - question: Why can US rules restrict sales of chips made in Taiwan, or tools made in the Netherlands?
+    options:
+      - Those countries have no export laws of their own
+      - US rules claim reach over foreign-made items produced with US technology, software or components, and allies have also coordinated their own controls
+      - Because the chips are sold in US dollars
+      - They cannot; only the countries themselves can restrict sales
+    answer: 1
+    explanation: Chokepoints are layered. Almost every advanced chip is designed with US software and made with US-origin tools, so a rule on foreign-made products made with US technology reaches them. Allied governments have also adopted aligned controls on their own tools.
+---
+
+Since October 2022, US rules have decided which AI chips and chipmaking tools may be sold to China. Nvidia has repeatedly designed chips to sit just below the latest threshold, only to see the threshold move. China has answered by building its own accelerators, stockpiling tools, and restricting exports of minerals the rest of the world needs. Each new rule makes headlines, and each is debated as either decisive or pointless.
+
+This lesson gives you a way to judge any such rule yourself: which link it targets, how long the target needs to route around it, and who pays for the detour.
+
+## The picture
+
+<Recall id="semiconductors">
+
+Leading-edge AI chips depend on a few chokepoints: EUV lithography (one supplier), leading-edge logic fabs, HBM memory, advanced packaging, and the software ecosystem around the dominant accelerator. What makes each one hard to route around is time: accumulated learning that money cannot quickly buy.
+
+</Recall>
+
+An <Term id="export-control">export control</Term> is a state editing the flow map. It denies a rival access to chokepoints the rival depends on. The rival then does what the bottleneck picture predicts anyone does at a binding link: it looks for a detour. It builds its own version, buys through third parties, rents the capability remotely, or makes up for weaker parts with more of something else. Every detour takes time and costs something.
+
+<Figure
+  name="controlled-flows"
+  title="Export controls as edits to the flow map"
+  caption="Three stages. Open flows of tools, top chips and memory into China; controls from 2022 cutting those flows at the leading edge; and responses: a domestic chain, leaks through third countries and remote cloud access, and counter-controls on minerals."
+  notice="The controls do not remove demand; they redirect it. Each blocked flow becomes an incentive to build a domestic link, which is where the long-run effect of a control is decided."
+/>
+
+<KeyIdea>
+
+A control **buys time**: roughly how long the target needs to route around the denied link. It **imposes a cost**: the penalty of the detour, in money, power, yield or performance. And it **spends leverage**: every detour the target completes is a chokepoint the controller no longer holds. Reading any rule means estimating these three.
+
+</KeyIdea>
+
+## How the controls evolved
+
+The rules changed often; their logic changed less.
+- **Chips, by performance threshold (from 2022).** The first rules restricted accelerators above certain levels of compute *and* chip-to-chip bandwidth. Nvidia responded with China-specific versions (A800, H800) with reduced interconnect. In 2023 the US switched to a measure of total processing performance (and performance per unit of chip area), which caught those versions. Nvidia then offered the H20: modest compute, but plenty of HBM bandwidth. In 2025 the H20 was first put under a licence requirement, then licensed in exchange for a share of revenue paid to the US government, while Beijing discouraged its companies from buying it. Late in 2025 the US announced it would allow sales of the more capable H200, a generation behind Nvidia's newest, to approved Chinese buyers, again with a share of revenue for the US government; how many would actually ship, and whether Beijing would let its firms buy them, was still unclear (as of mid-2026). US policy has swung, between and within administrations, as officials weighed whether selling to China builds dependence on US technology or funds a rival.
+- **Tools (from 2022).** The US restricted tools for making advanced logic and memory, and barred US persons from supporting advanced Chinese fabs. EUV machines had never been licensed for China: the Dutch government had withheld them since 2019. In 2023 the Netherlands and Japan introduced their own controls on advanced deep-ultraviolet lithography and other tools, later tightened.
+- **Memory (2024).** HBM was added to the controls, along with more tools and many more listed companies.
+- **Who, not just what.** The <Term id="entity-list">Entity List</Term> bars named companies from receiving US-origin items without a licence. Huawei was cut off from TSMC in 2020 through the <Term id="foreign-direct-product-rule">foreign direct product rule</Term>, which extends US rules to foreign-made goods produced with US technology. Because nearly every advanced chip is designed with US software and made with US-origin tools, this rule gives US controls a global reach.
+- **The rest of the world.** In January 2025 the outgoing US administration issued an <Term id="ai-diffusion-rule">AI diffusion rule</Term> that sorted countries into tiers with caps on how much advanced compute they could import. It was rescinded in May 2025 before it took effect, and replaced by country-by-country agreements, such as those with the UAE and Saudi Arabia, and a policy of promoting exports of the American AI stack to partners.
+
+Measurement drove much of this. Controls aimed at compute left memory bandwidth open, and the H20 used that gap.
+
+<Recall id="inference">
+
+Generating tokens (decode) is memory-bound: each step streams all the model's weights from memory, so its speed follows memory bandwidth, not peak compute. Prefill and training lean far more on compute.
+
+</Recall>
+
+That is why a chip with capped compute but high bandwidth remained valuable for serving models, and why later rules targeted HBM directly. Thresholds that follow the physics of the workload are harder to design around.
+
+## China's routes around
+
+- **Domestic accelerators.** Huawei's Ascend chips, made by SMIC, are the main alternative, with Cambricon and others behind. Each chip is weaker than Nvidia's best, so Huawei builds bigger systems: its CloudMatrix 384 links 384 Ascend chips.
+- **Domestic fabs.** SMIC produces 7 nm-class chips without EUV, using older lithography with multi-patterning. That works, but with extra steps, lower yields and limited volume. Domestic tool makers and memory makers are advancing from further behind.
+- **Stockpiling.** Chinese firms bought chipmaking tools and HBM heavily before each expected tightening; China was among the largest markets for tool makers in 2023–24.
+- **Leaks.** Reported smuggling of controlled chips through third countries, and renting controlled chips in overseas clouds, which export rules did not originally cover. Proposals to require chips to verify their location respond to this.
+- **Efficiency.** Chinese labs have been forced to do more with less compute. DeepSeek's V3 and R1 models, reportedly trained on H800s (a China-specific chip that was legal to export when bought), were notable for training and serving efficiency. How much compute Chinese labs have in total is disputed.
+- **Counter-controls.** China dominates the refining of several <Term id="critical-minerals">critical minerals</Term>. It put gallium and germanium exports under licence in 2023, banned some sales to the US in 2024, and in 2025 introduced sweeping licensing of rare earths and products containing them, parts of which were suspended for a year after a US–China trade truce late that year. Leverage runs both ways on the map.
+
+<Example title="paying for the detour in power">
+
+Independent analysts' estimates of Huawei's CloudMatrix 384 (2025), not official specifications, put its total compute at roughly **1.7×** that of Nvidia's leading 72-chip rack, but its power draw at roughly **4×**, because it needs over five times as many chips.
+- Per unit of compute, that is about 4 ÷ 1.7 ≈ **2.3×** the power.
+- A 100 MW training cluster built this way delivers roughly the compute of a 43 MW cluster of the best chips.
+
+In the United States, where power is the binding link, that would be a severe penalty. In China, which has been adding generating capacity fast, it is a detour worth taking. The target pays for the detour in the input it has most of. The limits then move to how many good chips SMIC can yield and how much HBM China can make.
+
+</Example>
+
+## Does it work? The debate
+
+**Supporters argue** that the controls have measurably limited the compute available to Chinese labs. Chinese founders, including DeepSeek's, have said publicly that access to chips is their main constraint. Huawei's output is held back by yields and memory. Delaying the scale-up of frontier training by even a few years matters if capability grows with compute.
+
+**Critics argue** that the controls have accelerated what they aimed to prevent: a Chinese chip industry with state backing and captive domestic demand. They also cost US firms a large market: advanced chip sales to China, which had been a significant share of Nvidia's data-center revenue before 2022, had fallen towards zero by 2025, while the revenue could have funded US research. Leaks and remote access blunt enforcement, efficiency gains show that algorithms can partly substitute for compute, and allied firms bear real costs.
+
+Both views fit the picture. The controls buy time and impose costs; they also spend leverage. Whether that trade is worth it depends on what the time is used for, and on how fast China's detours mature.
+
+## Reason with it
+
+**A new rule bans a chip; the vendor ships one just under the threshold. What does the next rule target?** Whatever the workaround used. When compute was capped, the workaround was bandwidth, so HBM and memory bandwidth came into scope. Thresholds tied to a single number invite designs that optimise everything else. That is why rules drift from chip specifications towards end users, end uses and whole categories such as HBM.
+
+**China has power but weaker chips. How does it scale, and what binds next?** It scales out: more chips, more power, bigger systems, as the example shows. That works because power is China's abundant input. Next to bind are the number of good chips SMIC can make without EUV, and HBM. So controls on tools and memory target China's binding links more precisely than chip bans alone.
+
+**The US allows sales of previous-generation chips to China. Who gains?** US vendors gain revenue, and Chinese buyers gain compute now. The US may also keep Chinese developers dependent on its ecosystem, slowing demand for domestic chips. Against that, China gets more compute sooner. Beijing, for its part, may discourage purchases to protect its own industry. Each side weighs present capability against future dependence.
+
+## Where this picture breaks
+
+- **It is not a two-player game.** The Netherlands, Japan, Korea and Taiwan host the chokepoints and bear the lost sales; their interests only partly align with Washington's. Other countries, from the Gulf to Southeast Asia, trade access and compliance.
+- **Measurement is poor.** How many chips are smuggled, how much is rented remotely, and how good domestic yields are, are all uncertain. So confident claims of success or failure should be treated with care.
+- **Models are harder to control than chips.** Once weights are published, they spread worldwide. Open-weight releases from both countries move capability across borders regardless of hardware rules.
+- **Detours become industries.** The picture treats routing around as a cost; for the target, it is also an investment that may eventually produce competitive exports.
+
+## Why it matters in the feed
+
+When a new rule is announced, identify the link (chips, tools, memory, cloud access, entities or minerals), then estimate how long the target needs to route around it and how the detour will be paid for. When Nvidia or AMD announces a "compliant" chip, look at which specification it keeps high. When China announces mineral licensing or discourages imports of a US chip, read it as a move on the same map. And when you read that controls "failed" or "worked", ask: compared with what, and measured how?
+
+## Recap
+
+- Export controls deny a rival the chokepoints from the semiconductors lesson: tools (including EUV and advanced DUV), top accelerators, HBM, and access for listed entities, with global reach through rules on foreign-made products using US technology.
+- Controls **buy time, impose costs and spend leverage**. Every workaround the target completes is a chokepoint lost.
+- China's routes: domestic accelerators and fabs, stockpiling, leaks and remote access, efficiency, and **counter-controls on critical minerals**.
+- Workarounds follow physics: capped compute left memory bandwidth, which matters for memory-bound decode from the inference lesson; weaker chips can be offset with more power where power is abundant.
+- The effectiveness debate turns on how much time is bought, what it costs, and how fast detours mature.

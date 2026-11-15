@@ -387,6 +387,234 @@ Based on research of the [arXiv API User's Manual](https://info.arxiv.org/help/a
 - Data flow patterns (props and URL params for sharing)
 - Future scalability (easy to add state management library if needed)
 
+### RAG Architecture for Context Retrieval
+
+**Retrieval-Augmented Generation for Article Queries**
+
+**Decision:** Implement a RAG (Retrieval-Augmented Generation) system to retrieve relevant document chunks when users ask questions about articles, ensuring accurate context is provided to the LLM.
+
+**Rationale:**
+- **Accuracy**: Retrieves only relevant sections of papers, reducing hallucination and improving answer quality
+- **Efficiency**: Avoids sending entire paper content for every query (works with caching)
+- **Context Precision**: Users' questions often relate to specific sections (methods, results, conclusions)
+- **Scalability**: Chunked retrieval scales better than full document context for long papers
+- **Cost Optimization**: Smaller context windows reduce token costs while maintaining accuracy
+- **Industry Standard**: RAG is the established pattern for document Q&A systems
+
+**Implementation Approach:**
+
+**1. Document Chunking Strategy:**
+
+**Chunking Approach:**
+- **Semantic Chunking**: Split papers into semantically meaningful sections (abstract, introduction, methods, results, discussion, conclusion)
+- **Overlap Strategy**: Include small overlap between chunks (e.g., 50-100 tokens) to preserve context at boundaries
+- **Size Limits**: Chunks sized for optimal embedding and retrieval (typically 500-1000 tokens per chunk)
+- **Metadata Preservation**: Each chunk retains paper_id, section_type, chunk_index, and position in document
+
+**Chunking Implementation:**
+```typescript
+// lib/rag/chunker.ts
+interface PaperChunk {
+  id: string
+  paper_id: string
+  content: string
+  section_type: 'abstract' | 'introduction' | 'methods' | 'results' | 'discussion' | 'conclusion' | 'other'
+  chunk_index: number
+  start_position: number
+  end_position: number
+  metadata: Record<string, any>
+}
+
+function chunkPaper(paperContent: string, paperId: string): PaperChunk[] {
+  // Parse HTML/structured content
+  // Identify semantic sections
+  // Create overlapping chunks
+  // Return chunk array
+}
+```
+
+**2. Embedding Generation:**
+
+**Embedding Strategy:**
+- **Model Selection**: Use embedding model (OpenAI text-embedding-3-small, text-embedding-ada-002, or similar)
+- **Batch Processing**: Generate embeddings for all chunks when paper is first processed
+- **Storage**: Store embeddings in vector database or alongside chunks
+- **Update Strategy**: Regenerate embeddings if paper content is updated
+
+**Embedding Implementation:**
+```typescript
+// lib/rag/embeddings.ts
+async function generateEmbeddings(chunks: PaperChunk[]): Promise<Embedding[]> {
+  // Call embedding API (OpenAI, etc.)
+  // Batch process for efficiency
+  // Return embeddings with chunk IDs
+}
+```
+
+**3. Vector Storage:**
+
+**Storage Options:**
+- **Option 1: SQLite with Vector Extension** (pgvector equivalent for SQLite, or use sqlite-vss)
+- **Option 2: Dedicated Vector Database** (Pinecone, Weaviate, Qdrant) - better for scale
+- **Option 3: Embeddings in Database** (store as JSON array) - simpler, less efficient
+- **Recommendation**: Start with SQLite + sqlite-vss for MVP, migrate to dedicated vector DB if needed
+
+**Database Schema Extensions:**
+- **paper_chunks Table**:
+  - `id`: String (primary key)
+  - `paper_id`: String (foreign key to papers)
+  - `content`: Text (chunk text content)
+  - `section_type`: String (semantic section identifier)
+  - `chunk_index`: Integer
+  - `start_position`: Integer
+  - `end_position`: Integer
+  - `embedding`: Vector/JSON (stored embedding)
+  - `metadata`: JSON (additional metadata)
+
+**4. Retrieval Strategy:**
+
+**Query Flow:**
+1. **User Query**: User asks question about paper
+2. **Query Embedding**: Generate embedding for user's question
+3. **Similarity Search**: Find top-k most relevant chunks (cosine similarity)
+4. **Context Assembly**: Combine retrieved chunks with query
+5. **LLM Query**: Send context + question to LLM
+6. **Response**: Return answer with optional source citations
+
+**Retrieval Implementation:**
+```typescript
+// lib/rag/retriever.ts
+interface RetrievalResult {
+  chunks: PaperChunk[]
+  scores: number[]
+  totalChunks: number
+}
+
+async function retrieveRelevantChunks(
+  query: string,
+  paperId: string,
+  topK: number = 3
+): Promise<RetrievalResult> {
+  // Generate query embedding
+  const queryEmbedding = await generateEmbedding(query)
+  
+  // Vector similarity search
+  const results = await vectorSearch(paperId, queryEmbedding, topK)
+  
+  // Return top-k chunks with scores
+  return results
+}
+```
+
+**5. Integration with LLM Queries:**
+
+**Intellisense Integration:**
+- **Selected Text Context**: When user selects text and asks "Explain", retrieve chunks around selection
+- **Hybrid Search**: Combine semantic search with position-based retrieval
+- **Context Window**: Include 2-3 most relevant chunks + selected text
+
+**Deep Dive Chat Integration:**
+- **Conversation Context**: For each chat message, retrieve relevant chunks
+- **Multi-Turn Context**: Maintain conversation history, retrieve fresh chunks per turn
+- **Citation Support**: Include chunk references in responses for transparency
+
+**Novelty Scoring Integration:**
+- **Section-Specific Analysis**: Retrieve relevant chunks for novelty analysis
+- **Comparative Context**: Retrieve chunks from related papers for comparison (future enhancement)
+
+**6. RAG Query Pattern:**
+
+```typescript
+// lib/rag/query.ts
+async function queryWithRAG(
+  question: string,
+  paperId: string,
+  options?: {
+    topK?: number
+    includeMetadata?: boolean
+    citationFormat?: 'inline' | 'footnote'
+  }
+): Promise<RAGResponse> {
+  // 1. Retrieve relevant chunks
+  const { chunks, scores } = await retrieveRelevantChunks(question, paperId, options?.topK || 3)
+  
+  // 2. Assemble context
+  const context = chunks.map(c => c.content).join('\n\n')
+  
+  // 3. Query LLM with context
+  const prompt = `Based on the following paper excerpts, answer the question.
+  
+Paper Excerpts:
+${context}
+
+Question: ${question}
+
+Answer:`
+  
+  // 4. Generate response (with or without caching)
+  const response = await llmService.query(prompt, { useCache: true })
+  
+  // 5. Return response with citations
+  return {
+    answer: response,
+    sources: chunks.map(c => ({
+      chunkId: c.id,
+      section: c.section_type,
+      score: scores[chunks.indexOf(c)],
+      excerpt: c.content.substring(0, 200) + '...'
+    }))
+  }
+}
+```
+
+**7. Performance Optimizations:**
+
+**Caching Strategy:**
+- **Chunk Embeddings**: Cache embeddings (they don't change unless paper is updated)
+- **Retrieval Results**: Cache common queries (e.g., "What is the main contribution?")
+- **LLM Responses**: Combine with existing LLM document caching
+
+**Batch Processing:**
+- **Initial Processing**: Generate chunks and embeddings when paper is first fetched
+- **Scheduled Jobs**: Pre-process chunks for popular papers
+- **Lazy Loading**: Generate chunks on-demand for less-accessed papers
+
+**8. Hybrid Search (Future Enhancement):**
+
+**Combined Retrieval:**
+- **Semantic Search**: Vector similarity for conceptual queries
+- **Keyword Search**: BM25 or full-text search for specific terms
+- **Hybrid Ranking**: Combine semantic and keyword scores
+- **Metadata Filtering**: Filter by section_type, date, etc.
+
+**Affects:**
+- Database schema (paper_chunks table, vector storage)
+- LLM service layer (RAG query patterns)
+- API routes (`/api/explain`, `/api/chat` - enhanced with RAG)
+- Processing pipeline (chunking and embedding generation)
+- Storage requirements (vector embeddings)
+- Query performance (similarity search optimization)
+
+**Technology Stack Considerations:**
+
+**Embedding Models:**
+- **OpenAI**: `text-embedding-3-small` (recommended for cost/performance)
+- **OpenAI**: `text-embedding-ada-002` (alternative)
+- **Open Source**: Sentence transformers (if self-hosting)
+
+**Vector Database Options:**
+- **SQLite + sqlite-vss**: Good for MVP, local-first approach
+- **Pinecone**: Managed vector database, easy integration
+- **Weaviate**: Self-hosted or cloud, good for scale
+- **Qdrant**: Open-source, self-hosted option
+
+**Integration with Existing Architecture:**
+- **Works with Caching**: RAG retrieval happens before LLM query, can still use cached documents
+- **Works with Multi-Tenant**: Chunks stored per paper (shared), retrieval is paper-specific
+- **Works with Scheduled Jobs**: Pre-generate chunks during scheduled processing
+- **Enhances Intellisense**: More accurate explanations with relevant context
+- **Enhances Chat**: Better answers with precise document sections
+
 ### Decision Impact Analysis
 
 **Implementation Sequence:**
@@ -808,6 +1036,11 @@ sphere/
 │   ├── auth.ts                       # NextAuth configuration
 │   ├── arxiv.ts                      # arXiv API client functions
 │   ├── llm.ts                        # LLM integration (novelty, explanations, chat)
+│   ├── rag/
+│   │   ├── chunker.ts                # Document chunking logic
+│   │   ├── embeddings.ts             # Embedding generation
+│   │   ├── retriever.ts              # Vector similarity search
+│   │   └── query.ts                  # RAG query orchestration
 │   ├── utils.ts                      # Shared utility functions
 │   └── validations.ts                # Zod validation schemas
 ├── types/
@@ -830,6 +1063,7 @@ sphere/
 - **External APIs:**
   - `/lib/arxiv.ts` - arXiv API client (rate limiting, error handling)
   - `/lib/llm.ts` - LLM API client (OpenAI/Anthropic/etc. for novelty scoring, explanations, chat)
+  - `/lib/rag/` - RAG system (chunking, embeddings, retrieval) for context-aware queries
 
 - **Internal API Routes** (`/app/api/`):
   - **Authentication**: `/api/auth/[...nextauth]` - NextAuth.js handles all auth flows
@@ -877,6 +1111,7 @@ sphere/
 - **Auth Service**: NextAuth.js (`/lib/auth.ts`) - Authentication and session management
 - **arXiv Service**: (`/lib/arxiv.ts`) - External arXiv API integration
 - **LLM Service**: (`/lib/llm.ts`) - LLM API integration (novelty scoring, explanations, chat)
+- **RAG Service**: (`/lib/rag/`) - Document chunking, embedding generation, and vector retrieval for context-aware queries
 
 **Data Boundaries:**
 
@@ -885,6 +1120,7 @@ sphere/
   - Papers table (arXiv metadata, novelty scores)
   - Library table (user-paper associations, reading progress)
   - User fetch timestamps (for arXiv synchronization)
+  - Paper chunks table (RAG chunks with embeddings for vector search)
 
 - **Data Access Pattern**: 
   - API routes → Prisma queries → SQLite database
@@ -918,7 +1154,7 @@ sphere/
    - Route: `app/reader/[id]/`
    - Components: `components/reader/` (PaperReader, IntellisensePopover, ChatPane, ContextMenu)
    - API: `app/api/explain/`, `app/api/chat/`
-   - Services: `lib/llm.ts` (explanations, chat)
+   - Services: `lib/llm.ts` (explanations, chat), `lib/rag/` (context retrieval)
    - Hooks: `hooks/useIntellisense.ts`, `hooks/useChat.ts`
 
 4. **To-Read List & Progress** →
@@ -964,17 +1200,22 @@ sphere/
 - **LLM APIs** (OpenAI, Anthropic, etc.):
   - Service: `lib/llm.ts`
   - Used by: 
-    - `app/api/explain/route.ts` (Intellisense explanations)
-    - `app/api/chat/route.ts` (Chat with paper)
+    - `app/api/explain/route.ts` (Intellisense explanations - enhanced with RAG)
+    - `app/api/chat/route.ts` (Chat with paper - enhanced with RAG)
     - Novelty scoring (called during arXiv fetch processing)
+  - **Embedding APIs** (OpenAI, etc.):
+    - Service: `lib/rag/embeddings.ts`
+    - Used by: RAG system for generating document chunk embeddings
+    - Model: `text-embedding-3-small` or `text-embedding-ada-002`
 
 **Data Flow:**
 
 1. **User Login** → NextAuth.js authenticates → Triggers arXiv fetch → Processes new articles → Updates database
 2. **Dashboard Load** → Server Component fetches papers from database → Renders with Novelty scores → Client Components handle interactions
 3. **Save Paper** → Client Component calls `/api/papers/[id]/save` → API route creates library entry → Updates database
-4. **Click-to-Explain** → User selects text → Client Component calls `/api/explain` → LLM service generates explanation → Returns to component
-5. **Chat with Paper** → User asks question → Client Component calls `/api/chat` (streaming) → LLM service streams response → Updates UI progressively
+4. **Paper Processing** → Paper fetched → RAG chunker splits paper into semantic chunks → Embeddings generated → Chunks and embeddings stored in database
+5. **Click-to-Explain** → User selects text → Client Component calls `/api/explain` → RAG retrieves relevant chunks → LLM service generates explanation with context → Returns to component
+6. **Chat with Paper** → User asks question → Client Component calls `/api/chat` (streaming) → RAG retrieves relevant chunks → LLM service streams response with context → Updates UI progressively
 
 ### File Organization Patterns
 

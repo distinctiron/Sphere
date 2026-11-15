@@ -50,7 +50,27 @@ FR16: User can mark a paper as "Read" (archiving it from the active list).
 
 FR17: User can remove papers from the list.
 
-FR18: System fetches new articles from arXiv API on user login, comparing against last login timestamp to identify and store new articles since the last synchronization.
+FR18: User can sign up and log in using federated identity providers (Google, Apple, Facebook) to lower entry barrier and enable faster onboarding.
+
+FR19: System enforces a free tier that allows processing of 5 articles without payment.
+
+FR20: User can purchase pay-as-you-go credits to process additional articles beyond the free tier limit.
+
+FR21: User can subscribe to a monthly subscription plan for unlimited article processing.
+
+FR22: System integrates with Stripe for payment processing (both one-time payments and recurring subscriptions).
+
+FR23: System tracks and displays remaining article processing quota based on user's payment plan.
+
+FR24: System prevents article processing when user has exceeded their quota and prompts for payment upgrade.
+
+FR25: System processes articles from arXiv on a fixed hourly schedule for Computer Science and Physics categories.
+
+FR26: System automatically generates novelty scores and summaries for newly fetched papers during scheduled processing.
+
+FR27: When a user logs in, the application requests and displays the newest papers that have been pre-processed.
+
+FR28: System tracks last processing timestamp per user to identify new articles since last synchronization.
 
 ### NonFunctional Requirements
 
@@ -113,15 +133,29 @@ FR14: Epic 4 - View personal To-Read list
 FR15: Epic 4 - Manually reorder papers in To-Read list
 FR16: Epic 4 - Mark paper as Read (archive from active list)
 FR17: Epic 4 - Remove papers from list
-FR18: Epic 2 - System fetches new articles from arXiv API on login
+FR18: Epic 1 - User can sign up and log in using federated identity providers (Google, Apple, Facebook)
+FR19: Epic 5 - System enforces a free tier that allows processing of 5 articles without payment
+FR20: Epic 5 - User can purchase pay-as-you-go credits to process additional articles
+FR21: Epic 5 - User can subscribe to a monthly subscription plan for unlimited article processing
+FR22: Epic 5 - System integrates with Stripe for payment processing
+FR23: Epic 5 - System tracks and displays remaining article processing quota
+FR24: Epic 5 - System prevents article processing when user has exceeded quota
+FR25: Epic 6 - System processes articles from arXiv on a fixed hourly schedule for CS and Physics
+FR26: Epic 6 - System automatically generates novelty scores and summaries during scheduled processing
+FR27: Epic 6 - When user logs in, application requests and displays newest pre-processed papers
+FR28: Epic 6 - System tracks last processing timestamp per user
 
 ## Epic List
 
-### Epic 1: Foundation & User Authentication
+#### Epic 9: Learn Tab (Post-MVP)
 
-Users can create accounts, log in securely, and manage their profiles. This epic establishes the authentication foundation required for all other features.
+A structured curriculum for the feed's topic (starting with AI), in four paths: the math of neural networks and LLMs; compute from silicon to data centers and hosting; building with AI (agents, harness engineering, skills); and the AI economy and geopolitics. Each path is built on a holistic mental model. Lessons are authored with animated figures, cross-referenced (builds on / comes back in), quizzed, linked to the user's News and papers, and supported by a tutor chat.
 
-**FRs covered:** FR1, FR2, FR3
+## Epic 1: Foundation & User Authentication
+
+Users can create accounts, log in securely using email/password or federated identity providers, and manage their profiles. This epic establishes the authentication foundation required for all other features.
+
+**FRs covered:** FR1, FR2, FR3, FR18
 
 ### Epic 2: Paper Discovery & Impact Dashboard
 
@@ -140,6 +174,22 @@ Users can read papers in an interactive HTML view with click-to-explain Intellis
 Users can manage their reading lists: view saved papers, reorder priorities, track reading progress, and organize their collection. Builds upon the basic "Add to List" capability from Epic 2, providing full library management capabilities.
 
 **FRs covered:** FR14, FR15, FR16, FR17
+
+### Epic 5: Payment & Monetization (Post-MVP)
+
+Users can access a free tier with limited article processing, and upgrade to pay-as-you-go or subscription plans via Stripe integration. This epic enables monetization and sustainable business operations.
+
+**FRs covered:** FR19, FR20, FR21, FR22, FR23, FR24
+
+### Epic 6: Scheduled Content Processing & Pre-computation (Post-MVP)
+
+System automatically fetches and pre-processes papers from arXiv on a scheduled basis, generating novelty scores and summaries in advance. This reduces user wait times and improves experience by having content ready when users log in.
+
+**FRs covered:** FR25, FR26, FR27, FR28
+
+### Epic 8: Breaking AI News (Post-MVP)
+
+Beyond arXiv, users follow AI news breaking across Hacker News, Reddit, GitHub, news outlets and X. Items are grouped into stories, ranked by cross-platform heat, summarized, and each story opens as an AI-written breakdown with sources and bigger-picture analysis.
 
 ## Epic 1: Foundation & User Authentication
 
@@ -1121,3 +1171,578 @@ So that I can clean up my reading list and remove papers I no longer want to tra
 **Then** removed papers do not reappear
 **And** my library reflects only the papers I've kept
 
+## Epic 5: Payment & Monetization (Post-MVP)
+
+Users can access a free tier with limited article processing, and upgrade to pay-as-you-go or subscription plans via Stripe integration. This epic enables monetization and sustainable business operations.
+
+**FRs covered:** FR19, FR20, FR21, FR22, FR23, FR24
+
+### Story 5.1: Payment Database Schema & User Quota Tracking
+
+As a developer,
+I want to define the database schema for payment plans, user quotas, and transaction tracking,
+So that the system can enforce usage limits and process payments correctly.
+
+**Acceptance Criteria:**
+
+**Given** the Prisma schema file exists
+**When** I define the PaymentPlan model (or add to User model)
+**Then** the model includes fields for: plan_type (enum: "free", "pay_as_you_go", "subscription"), articles_remaining (Integer), articles_limit (Integer), stripe_customer_id (String, nullable), stripe_subscription_id (String, nullable), subscription_status (String, nullable), created_at (DateTime), updated_at (DateTime)
+**And** it is associated with the User model via user_id foreign key
+
+**Given** the Prisma schema file
+**When** I define a Transaction model
+**Then** the model includes fields for: user_id (foreign key), transaction_type (enum: "one_time_payment", "subscription_payment"), amount (Decimal), currency (String), stripe_payment_intent_id (String, nullable), stripe_subscription_id (String, nullable), status (enum: "pending", "completed", "failed"), articles_purchased (Integer, nullable), created_at (DateTime)
+**And** it tracks all payment transactions for audit and reconciliation
+
+**Given** the schema is defined
+**When** I run Prisma migrations
+**Then** the payment_plans table (or fields added to users table) is created
+**And** the transactions table is created with proper relationships
+**And** all fields have appropriate data types and constraints
+
+**Given** the database schema is created
+**When** I generate the Prisma client
+**Then** TypeScript types are generated for PaymentPlan and Transaction models
+**And** the types can be imported and used in API routes and components
+
+### Story 5.2: Free Tier Enforcement & Quota Management
+
+As a logged-in user,
+I want to understand my article processing quota and see when I need to upgrade,
+So that I can manage my usage and make informed decisions about payment.
+
+**Acceptance Criteria:**
+
+**Given** I am a new user
+**When** I register an account
+**Then** a free tier payment plan is automatically created for me
+**And** my articles_remaining is set to 5
+**And** my articles_limit is set to 5
+**And** my plan_type is set to "free"
+
+**Given** I process an article (novelty scoring, summary generation, or LLM interactions)
+**When** the processing is requested
+**Then** the system checks my articles_remaining quota
+**And** if articles_remaining > 0, the processing proceeds and articles_remaining is decremented
+**And** if articles_remaining = 0, the processing is blocked and I am prompted to upgrade
+
+**Given** I view my account profile or dashboard
+**When** the page loads
+**Then** my current quota status is displayed (e.g., "3 of 5 articles remaining")
+**And** my current plan type is shown (e.g., "Free Tier")
+**And** upgrade options are clearly visible when quota is low or exhausted
+
+**Given** I have exhausted my free tier quota
+**When** I attempt to process an article
+**Then** a payment wall is displayed
+**And** the wall explains my quota is exhausted
+**And** it presents options: "Purchase Credits" (pay-as-you-go) or "Subscribe" (monthly unlimited)
+**And** I cannot proceed with processing until I upgrade
+
+**Given** quota management is implemented
+**When** I upgrade to a paid plan
+**Then** my quota is updated according to the new plan
+**And** the quota display reflects the new limits immediately
+
+### Story 5.3: Stripe Integration & Pay-as-You-Go Purchases
+
+As a logged-in user,
+I want to purchase article processing credits on a one-time basis,
+So that I can try the service without committing to a subscription.
+
+**Acceptance Criteria:**
+
+**Given** I want to purchase credits
+**When** I click "Purchase Credits" from the payment wall or account page
+**Then** I am presented with credit package options (e.g., 10 articles for $X, 25 articles for $Y)
+**And** pricing is clearly displayed
+**And** I can select a package
+
+**Given** I select a credit package
+**When** I proceed to checkout
+**Then** Stripe Checkout is initialized with the selected package
+**And** I am redirected to Stripe's secure payment page
+**And** I can enter my payment information securely
+
+**Given** I complete payment on Stripe
+**When** the payment is successful
+**Then** Stripe sends a webhook to our application
+**And** a Transaction record is created with status "completed"
+**And** my articles_remaining quota is increased by the purchased amount
+**And** I am redirected back to the application with a success message
+**And** I can immediately use the purchased credits
+
+**Given** payment processing
+**When** the payment fails or is cancelled
+**Then** a Transaction record is created with status "failed" or "pending"
+**And** my quota is not updated
+**And** an appropriate error message is displayed
+**And** I can retry the purchase
+
+**Given** Stripe webhook integration
+**When** Stripe sends payment events
+**Then** the webhook endpoint verifies the webhook signature
+**And** payment_intent.succeeded events update transactions and quotas
+**And** payment_intent.payment_failed events are logged appropriately
+**And** webhook processing is idempotent (handles duplicate events)
+
+### Story 5.4: Subscription Plan Management
+
+As a logged-in user,
+I want to subscribe to a monthly plan for unlimited article processing,
+So that I can use the service without worrying about per-article costs.
+
+**Acceptance Criteria:**
+
+**Given** I want to subscribe
+**When** I click "Subscribe" from the payment wall or account page
+**Then** I am presented with subscription plan options (e.g., Monthly Unlimited for $X/month)
+**And** plan features and pricing are clearly displayed
+**And** I can select a subscription plan
+
+**Given** I select a subscription plan
+**When** I proceed to checkout
+**Then** Stripe Checkout is initialized for subscription creation
+**And** I am redirected to Stripe's secure payment page
+**And** I can enter my payment information for recurring billing
+
+**Given** I complete subscription payment
+**When** the subscription is created successfully
+**Then** Stripe creates a subscription and sends a webhook
+**And** my PaymentPlan is updated: plan_type = "subscription", articles_remaining = -1 (unlimited), stripe_subscription_id is stored
+**And** subscription_status is set to "active"
+**And** I am redirected back with a success message
+**And** I have unlimited article processing immediately
+
+**Given** I have an active subscription
+**When** I process articles
+**Then** my articles_remaining is not decremented (unlimited)
+**And** quota checks pass automatically
+**And** no payment wall is displayed
+
+**Given** subscription management
+**When** Stripe sends subscription webhook events
+**Then** customer.subscription.created events activate the subscription
+**And** customer.subscription.updated events update subscription status
+**And** customer.subscription.deleted events downgrade to free tier
+**And** invoice.payment_succeeded events are logged
+**And** invoice.payment_failed events trigger dunning/retry logic
+
+**Given** I have a subscription
+**When** I view my account page
+**Then** my subscription status is displayed (e.g., "Active - Unlimited Plan")
+**And** next billing date is shown
+**And** I can cancel my subscription (cancellation handled via Stripe)
+
+### Story 5.5: Payment Status Display & Quota UI
+
+As a logged-in user,
+I want to see my current payment status and quota information clearly,
+So that I always know how many articles I can process and when I need to upgrade.
+
+**Acceptance Criteria:**
+
+**Given** I am logged in
+**When** I view the dashboard or account page
+**Then** my quota status is prominently displayed (e.g., "5 articles remaining" or "Unlimited")
+**And** my current plan type is shown
+**And** the display updates in real-time as I use articles
+
+**Given** quota display
+**When** my quota is low (e.g., 1-2 articles remaining)
+**Then** a warning indicator is shown
+**And** upgrade prompts are more prominent
+**And** I am encouraged to purchase credits or subscribe
+
+**Given** quota display
+**When** my quota is exhausted
+**Then** the quota shows "0 articles remaining"
+**And** upgrade options are immediately visible
+**And** processing actions are disabled with clear messaging
+
+**Given** payment status display
+**When** I have an active subscription
+**Then** subscription details are shown: plan name, billing cycle, next billing date
+**And** cancellation option is available (if applicable)
+**And** unlimited status is clearly indicated
+
+## Epic 6: Scheduled Content Processing & Pre-computation (Post-MVP)
+
+System automatically fetches and pre-processes papers from arXiv on a scheduled basis, generating novelty scores and summaries in advance. This reduces user wait times and improves experience by having content ready when users log in.
+
+**FRs covered:** FR25, FR26, FR27, FR28
+
+### Story 6.1: Scheduled Job Infrastructure
+
+As a system administrator,
+I want to set up scheduled background jobs for arXiv processing,
+So that papers are fetched and pre-processed automatically without user intervention.
+
+**Acceptance Criteria:**
+
+**Given** the application infrastructure
+**When** scheduled job system is implemented
+**Then** a job scheduler is configured (e.g., cron, node-cron, or cloud scheduler)
+**And** jobs can run on a fixed hourly schedule
+**And** jobs are isolated from user-facing API routes
+**And** job execution is logged for monitoring
+
+**Given** scheduled job infrastructure
+**When** a job is triggered
+**Then** it can access the database and external APIs (arXiv, LLM)
+**And** it handles errors gracefully without crashing
+**And** it can be monitored and debugged
+**And** job status can be tracked (running, completed, failed)
+
+**Given** job scheduling
+**When** multiple jobs are scheduled
+**Then** they can run concurrently or sequentially as needed
+**And** resource usage (API rate limits, database connections) is managed
+**And** job failures don't block other jobs
+
+### Story 6.2: Hourly arXiv Fetching for CS & Physics
+
+As a system component,
+I want to automatically fetch new papers from arXiv every hour for Computer Science and Physics categories,
+So that fresh content is always available for users.
+
+**Acceptance Criteria:**
+
+**Given** the scheduled job runs hourly
+**When** the arXiv fetching job executes
+**Then** it queries arXiv API for Computer Science (cs.*) and Physics (physics.*) categories
+**And** it fetches papers submitted in the last hour (using submittedDate filter)
+**And** it processes the Atom XML response and extracts paper metadata
+
+**Given** papers are fetched from arXiv
+**When** papers are processed
+**Then** duplicate papers (matching arxiv_id) are detected and skipped
+**And** new papers are inserted into the centralized papers database
+**And** existing papers are updated if metadata has changed
+**And** fetch timestamp is recorded for monitoring
+
+**Given** arXiv fetching
+**When** the API rate limit is exceeded or an error occurs
+**Then** the error is logged
+**And** the job completes gracefully without crashing
+**And** partial results (if any) are saved
+**And** the next scheduled run will retry
+
+**Given** hourly fetching is implemented
+**When** papers are fetched
+**Then** they are stored in the centralized database
+**And** all users can access these papers (not user-specific)
+**And** the papers are ready for novelty scoring (next story)
+
+### Story 6.3: Automated Novelty Scoring & Summary Generation
+
+As a system component,
+I want to automatically generate novelty scores and summaries for newly fetched papers,
+So that users see pre-computed insights immediately when they log in.
+
+**Acceptance Criteria:**
+
+**Given** new papers have been fetched and stored
+**When** the novelty scoring job runs (as part of scheduled processing)
+**Then** each new paper is sent to the LLM for novelty analysis
+**And** novelty_score and novelty_summary are generated
+**And** the scores and summaries are stored in the papers table
+**And** papers are ready for immediate display to users
+
+**Given** automated scoring
+**When** scoring is performed
+**Then** papers are processed in batch (efficient LLM API usage)
+**And** scoring failures for individual papers don't stop the batch
+**And** failed papers are logged for retry
+**And** successfully scored papers are immediately available
+
+**Given** scoring automation
+**When** LLM API is unavailable or rate-limited
+**Then** the job handles errors gracefully
+**And** unscored papers remain in the database (null novelty_score)
+**And** users can still access papers (they just won't have scores yet)
+**And** scoring can be retried in the next scheduled run or manually
+
+**Given** pre-computed scores and summaries
+**When** users log in
+**Then** papers are displayed with scores and summaries already available
+**And** no waiting time for novelty computation
+**And** dashboard loads faster with pre-processed content
+
+### Story 6.4: User Login & Pre-processed Paper Display
+
+As a logged-in user,
+I want to see the newest pre-processed papers when I log in,
+So that I have fresh, ready-to-read content immediately available.
+
+**Acceptance Criteria:**
+
+**Given** I log in to the application
+**When** my session is established
+**Then** the system queries for the newest pre-processed papers from the centralized database
+**And** papers are filtered to show those fetched since my last login (using last_fetch_timestamp)
+**And** papers with novelty scores and summaries are prioritized in display
+
+**Given** pre-processed papers are available
+**When** I view the dashboard
+**Then** papers are displayed with novelty scores and summaries already populated
+**And** no "scoring in progress" states are shown for pre-processed papers
+**And** dashboard loads quickly with ready content
+
+**Given** user login and paper display
+**When** my last_fetch_timestamp is updated
+**Then** it is set to the current timestamp
+**And** future logins will only show papers newer than this timestamp
+**And** I don't see duplicate papers I've already seen
+
+**Given** pre-processed content display
+**When** some papers haven't been scored yet (scoring job failed or pending)
+**Then** those papers are still displayed
+**And** they show "Score pending" or similar indicator
+**And** manual scoring can be triggered if needed (from Epic 2)
+
+**Note:** This epic significantly improves user experience by having content ready when users arrive, rather than making them wait for processing. It also enables the centralized database and caching architecture (from NFRs) by ensuring all papers are in one place before users access them.
+
+## Epic 8: Breaking AI News (Post-MVP)
+
+Beyond arXiv, users follow AI news breaking across Hacker News, Reddit, GitHub, news outlets and X. Items are grouped into stories, ranked by cross-platform heat, summarized, and each story opens as an AI-written breakdown with sources and bigger-picture analysis. Starts with a single AI topic; the topic configuration allows more later.
+
+### Story 8.1: News Schema, Source Framework, Hacker News & Outlet Feeds
+
+As a developer,
+I want a data model and a pluggable source framework for news items,
+So that breaking stories from different platforms can be collected, stored and de-duplicated.
+
+**Acceptance Criteria:**
+
+**Given** the Prisma schema
+**When** the news models are added
+**Then** `NewsItem` (source, externalId, url, canonicalUrl, title, snippet, sourceName, publishedAt, engagement, comments, content, embedding, storyId), `NewsStory` and `UserStoryState` exist with a migration, and items are unique on (source, externalId)
+
+**Given** a topic configuration (AI)
+**When** a source adapter runs
+**Then** it returns normalised items for that topic, and adapters for Hacker News (Algolia API) and RSS/Atom outlet feeds (TechCrunch, The Verge, VentureBeat, MIT Technology Review, Ars Technica, Hugging Face, DeepMind, OpenAI, Google News) are available
+
+**Given** items linking to the same article
+**When** they are stored
+**Then** their canonical URL (tracking parameters, www, fragments and trailing slashes removed; x.com/twitter.com and arXiv variants unified) is identical, and the same outlet article arriving through two feeds is stored once
+
+### Story 8.2: Reddit, GitHub & X Source Adapters
+
+As a user following AI,
+I want stories from Reddit, GitHub and X,
+So that I see what communities and developers are reacting to, not just news outlets.
+
+**Acceptance Criteria:**
+
+**Given** the topic's subreddits
+**When** Reddit is fetched
+**Then** today's top posts of all subreddits are fetched in one multireddit request: via OAuth with upvotes when REDDIT_CLIENT_ID/SECRET are set, otherwise via the public Atom feed (no scores, ~1 request/minute limit)
+
+**Given** GitHub
+**When** it is fetched
+**Then** new fast-rising repositories (Search API, last 3 days) and the newest newsworthy release of watched repos (build, nightly and pre-release tags skipped) are returned with star counts
+
+**Given** X_RSS_URL_TEMPLATE pointing to an RSS bridge (RSSHub/Nitter)
+**When** X is fetched
+**Then** posts of the configured accounts are returned (retweets skipped, outbound link used as the story link); without the template the source is skipped with an explanation
+
+**Given** any source failing
+**When** the fetch job runs
+**Then** other sources still complete and per-source results/errors are recorded in the job run
+
+### Story 8.3: Story Clustering & Heat Ranking
+
+As a user,
+I want coverage of the same event grouped into one story and ranked by how big it is,
+So that I see each breaking story once, with the biggest first.
+
+**Acceptance Criteria:**
+
+**Given** new items
+**When** the clustering job runs
+**Then** each item joins a story with the same canonical URL, or the most similar active story from the last 48h (embedding cosine ≥ NEWS_CLUSTER_THRESHOLD, defaults 0.62 OpenAI / 0.4 local), or starts a new story; stories split by arrival order are merged afterwards
+
+**Given** active stories
+**When** they are ranked
+**Then** heat = per-platform normalised engagement (log-scaled) × boost for multiple platforms/outlets × time decay (half-life NEWS_HEAT_HALF_LIFE_HOURS, default 8h)
+
+**Given** a story covered on ≥2 platforms or by ≥3 outlets in the last 6h, or among the hottest fresh multi-item stories
+**When** ranking runs
+**Then** it is flagged as breaking
+
+**Given** stories not seen for 7 days
+**When** cleanup runs
+**Then** they are archived, and items/stories older than 30 days are deleted unless a user saved the story
+
+### Story 8.4: LLM Story Headlines & Summaries
+
+As a user,
+I want a clear headline, summary and why-it-matters line for each story,
+So that I can grasp a story in seconds.
+
+**Acceptance Criteria:**
+
+**Given** stories that are new or grew since they were summarized
+**When** the summarize job runs
+**Then** the hottest (up to NEWS_SUMMARIZE_MAX_PER_RUN) get an LLM headline, 2-3 sentence summary and why-it-matters line via structured output
+
+**Given** LLM errors
+**When** summarizing
+**Then** bad credentials stop the run without penalising stories, repeated rate limits trip a circuit breaker, and other failures are retried later (max 5 attempts)
+
+**Given** mock mode (no LLM key)
+**When** the job runs
+**Then** it is skipped and stories keep their best source headline
+
+### Story 8.5: News API & Dashboard News Tab
+
+As a user,
+I want a News tab on the overview page,
+So that I can follow breaking AI news next to my papers.
+
+**Acceptance Criteria:**
+
+**Given** the dashboard
+**When** I switch to News (`/dashboard?tab=news`)
+**Then** I see a "Breaking now" strip and ranked story cards with headline, summary, why it matters, age, platform chips (e.g. HN points, subreddits, outlet count, GitHub stars) and expandable source links
+
+**Given** the feed
+**When** I change filters
+**Then** I can choose the time window (24h/3 days/week), sort (hottest/latest), platforms, and a Saved view; the feed refreshes every 2 minutes
+
+**Given** a story
+**When** I save or dismiss it
+**Then** the state is stored per user (`PATCH /api/news/stories/[id]`), dismissed stories disappear and saved ones appear under Saved
+
+**Given** no news fetched yet or a source failing
+**When** I open the tab
+**Then** an explanatory empty state or source warning is shown
+
+### Story 8.6: Story Article Page: AI Breakdown, Sources & Bigger Picture
+
+As a user,
+I want to click a story and read an article explaining it,
+So that I understand what is happening, how each source covers it and what it means.
+
+**Acceptance Criteria:**
+
+**Given** a story
+**When** I open it (`/news/[id]`)
+**Then** an AI-generated article streams in with three sections (What's happening; Source breakdown per platform/outlet incl. community sentiment; The bigger picture with implications and what to watch) and inline [n] citations linking to the sources
+
+**Given** article generation
+**When** sources are prepared
+**Then** the text of linked articles, HN/Reddit top comments, GitHub READMEs/release notes is fetched (bounded, cached on the item) and readable sources are preferred over headline-only aggregator links
+
+**Given** a generated article
+**When** the story is opened again
+**Then** the cached article is shown instantly; after the story gains 2+ items or a new platform it is flagged as updated and can be regenerated; breaking stories are pre-generated by the summarize job
+
+**Given** the page
+**When** it loads
+**Then** coverage is listed grouped by platform, related earlier stories and Sphere papers (embedding similarity) are linked, the story is marked read, and it can be saved or dismissed
+
+### Story 8.7: News Scheduling, Monitoring & Retention
+
+As a system administrator,
+I want the news pipeline to run automatically and be observable,
+So that breaking news is fresh without manual work.
+
+**Acceptance Criteria:**
+
+**Given** ENABLE_SCHEDULER=true
+**When** the server starts
+**Then** the scheduler runs process-papers hourly and process-news (news-fetch → news-clustering → news-summarize) every NEWS_INTERVAL_MINUTES (default 15, at :02/:17/…)
+
+**Given** an external scheduler
+**When** it calls `/api/cron/process-news` with the cron secret, or `npm run jobs:run -- process-news` is used
+**Then** the same pipeline runs with locking and job-run tracking
+
+**Given** GET /api/cron/status
+**When** it is called
+**Then** news jobs and the news backlog (unclustered items, active/unsummarized stories) are reported
+
+## Epic 9: Learn Tab (Post-MVP)
+
+Users learn the background that makes the feed understandable: a step-by-step curriculum on the feed's topic (AI first) in four paths. The teaching method builds holistic mental pictures that learners can reason with, rather than memorisation. The pictures are introduced early, drawn as animated or interactive figures, and extended by every lesson. Concepts are reinforced by explicit, non-circular back-references.
+
+### Story 9.1: Curriculum Registry, Lesson Content Format & Pages
+
+As a learner,
+I want a Learn tab with paths, modules and lessons,
+So that I can follow a clear step-by-step learning plan.
+
+**Acceptance Criteria:**
+
+**Given** the curriculum registry (`lib/learn/curriculum.ts`) and MDX lesson files (`content/learn/<path>/<lesson>.mdx`)
+**When** I open `/learn`
+**Then** I see four paths (Math, Compute, Building, Economy) with their mental models, a suggested route and progress, and I can open each path and lesson
+
+**Given** a lesson
+**When** it renders
+**Then** it shows its breadcrumb, minutes, mental model, the lessons it builds on, the MDX body with math (KaTeX), glossary terms, callouts and figures, prev/next, "where this comes back" and related lessons
+
+### Story 9.2: Progress Tracking & Quizzes
+
+As a learner,
+I want my progress saved and to check my understanding,
+So that I know where I am and whether I understood a lesson.
+
+**Acceptance Criteria:**
+
+**Given** I open a lesson **When** it loads **Then** it is recorded as started and appears under "Continue where you left off"
+**Given** the end-of-lesson quiz **When** I answer all questions **Then** each answer is explained, my score is saved, and at least half right marks the lesson complete; I can also mark it complete manually
+**Given** a path **When** I view it **Then** completion per lesson and per path is shown
+
+### Story 9.3: Figure Framework & Animations
+
+As a learner,
+I want animated and interactive figures that convey meaning,
+So that I build a visual mental model of each concept.
+
+**Acceptance Criteria:**
+
+**Given** a `<Figure name>` in a lesson **When** it scrolls into view **Then** it plays (staged SVG/CSS loops or interactive React), pauses off-screen, supports pause and replay, and respects reduced motion
+**Given** a phone-width screen **When** a figure renders **Then** it fits without horizontal scroll and its text stays readable
+
+### Story 9.4: Lesson Tutor
+
+As a learner,
+I want to ask questions when a concept is unclear,
+So that I get explanations grounded in the lesson I'm reading.
+
+**Acceptance Criteria:**
+
+**Given** a lesson **When** I ask the tutor (or select a passage and choose "Ask about this") **Then** an answer streams (SSE) grounded in the lesson text, its prerequisites, glossary and the path's mental model, with links to other lessons and KaTeX math
+
+### Story 9.5: Feed Links, Glossary & Cross-References
+
+As a learner,
+I want lessons connected to my feed and to each other,
+So that I can apply what I learn and easily go back to foundations.
+
+**Acceptance Criteria:**
+
+**Given** a lesson **When** it loads **Then** this week's News stories and my papers that match its keywords are linked
+**Given** the overview **When** it loads **Then** lessons are ranked by how many of this week's stories they explain
+**Given** a News story page **When** it loads **Then** matching "Background lessons" are linked
+**Given** `/learn/glossary` **When** I open it **Then** every term is listed A–Z with a link to the lesson that teaches it; terms in lessons show definitions on hover or tap
+**Given** a lesson's prerequisites **When** content is validated **Then** prerequisites are acyclic, every prerequisite is recalled in the body, and recaps only point backwards
+
+### Story 9.6: Path A: The Math of Neural Networks & LLMs
+
+15 lessons: vectors, matrices, derivatives, probability, neuron, forward pass, gradient descent, backpropagation, training in practice, embeddings, attention, transformer, pretraining, sampling, post-training. Mental models: "meaning is geometry" and "learning is walking downhill".
+
+### Story 9.7: Path B: Compute, From Silicon to Data Centers
+
+10 lessons: CPU, GPU, memory wall, accelerators, distributed training, data center, energy, inference, serving at scale, hosting. Mental model: "arithmetic is cheap; moving data and power is what costs".
+
+### Story 9.8: Path C: Building with AI, Agents & Harness Engineering
+
+9 lessons: model API, context engineering, tool use, RAG, agent loop, harness engineering, skills and MCP, evals, agent security. Mental model: "the model is a stateless function from context to next token".
+
+### Story 9.9: Path D: The AI Economy & Geopolitics
+
+9 lessons: value chain, semiconductors, hyperscalers, labs, unit economics, build-out, export controls, sovereign AI, national security. Mental model: "follow the bottleneck, and who controls it".

@@ -1,0 +1,163 @@
+---
+id: unit-economics
+title: The unit economics of AI
+summary: What a token costs to make and who keeps the margin. Training is a fixed cost spread over every token served; serving is a variable cost set by GPU-hour prices, batching and utilisation. Prices for a given capability fall about tenfold a year, yet total spending rises.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [inference, labs]
+related: [serving-at-scale, pretraining, hyperscalers, value-chain, hosting]
+keywords: ["price per token", "cost per token", "token pricing", "API pricing", "gross margin", "inference cost", "GPU hour", "price war", "Jevons paradox", "training cost"]
+reviewed: 2026-09-29
+quiz:
+  - question: A provider serves a 70B model on rented GPUs. Which single change lowers its cost per output token the most, according to the serving picture?
+    options:
+      - Negotiating the GPU rental price down by 20%
+      - Raising the number of sequences decoded together from 1 to 100, because each pass over the weights then produces 100 tokens instead of one
+      - Shortening the model's name
+      - Switching from a US to a European data center
+    answer: 1
+    explanation: Decode is memory-bound, so a step costs about the same whether it serves one sequence or a hundred, until memory or compute runs out. Tokens per GPU-hour therefore rise almost in proportion to batch size, and cost per token falls by a similar factor. A 20% cheaper GPU-hour lowers cost by only 20%.
+  - question: The price of a fixed level of capability fell about tenfold a year, yet total spending on AI inference rose. Which explanation fits best?
+    options:
+      - Providers raised prices on older models
+      - Cheaper tokens opened new uses and much longer tasks, such as reasoning models and agents that consume many more tokens per task, so volume grew faster than price fell
+      - Prices are measured incorrectly
+      - Only training spending rose
+    answer: 1
+    explanation: This is the Jevons pattern. When the price of a useful input falls, demand can grow by more than the price fell. Each task also got hungrier, because reasoning models generate thousands of thinking tokens and agents run loops of calls. Spending per task and in total can rise while the price per token falls.
+  - question: Many independent hosts serve the same open-weight model. Where does the bottleneck picture say the margin on those tokens ends up?
+    options:
+      - With the hosts, because they do the serving
+      - Mostly with the suppliers of the scarce input, GPUs and powered capacity, since hosts compete on price for an identical product and pay the market rate for compute
+      - With the lab that released the weights
+      - With end users
+    answer: 1
+    explanation: Identical tokens from many hosts are a commodity, so competition pushes their price towards cost. The cost is mostly GPU-hours, whose price reflects the chokepoints beneath. The hosts' margin is thin; the lab earns nothing per token; the scarce links keep theirs.
+  - question: Using the inference lesson, why do providers offer large discounts for batch jobs that can wait hours, and for repeated prompt prefixes?
+    options:
+      - Batch jobs use a smaller model
+      - Waiting jobs fill idle GPU time and big batches, raising utilisation, and cached prefixes skip prefill work already done, so both lower the provider's cost per token
+      - Discounts are required by regulators
+      - Batch jobs do not use GPUs
+    answer: 1
+    explanation: Cost per token is GPU-hours divided by tokens produced. Work that can be scheduled into quiet hours or packed into large batches raises tokens per GPU-hour without buying more GPUs. A cached prefix means its keys and values already exist, so that part of prefill never runs again.
+---
+
+A million tokens, a few novels' worth of text, costs a few cents from a small model and tens of dollars from a frontier one. Prices for any given level of capability have been falling roughly tenfold a year, by common estimates. Yet leading labs spend more than they earn, and total spending on AI keeps rising. How can all of that be true at once?
+
+This lesson answers with unit economics: what one token costs to make, which costs are fixed and which vary, and which link in the chain keeps the margin. It is the lesson where the physics of inference meets the business of labs.
+
+## The picture
+
+<Recall id="labs">
+
+A frontier lab holds a lead in model quality that decays as rivals catch up. It must earn back each model's training cost during a short premium window, while the next generation costs roughly two to three times more.
+
+</Recall>
+
+Every token passes through the whole chain. Its **price** is the sum of what each link charges; its **cost** splits into two kinds.
+- **Fixed cost:** training the model (plus the research behind it). It is paid once, before any token is sold, so each token's share of it falls as more tokens are served.
+- **Variable cost:** serving each token, which is renting GPU time. It is paid every time.
+
+The variable cost is **GPU-hours ÷ tokens produced per GPU-hour**. The numerator is set by the chain beneath (chip margins, power, cloud margins). The denominator is set by the physics of inference: how many tokens one pass over the weights can produce.
+
+<Recall id="inference">
+
+Decode, which generates output tokens, is memory-bound: every step streams all of the model's weights from memory to produce one token per sequence. Batching many sequences shares each pass over the weights, so throughput rises almost linearly with batch size until the KV cache fills memory or compute becomes the limit. Prefill, which reads the prompt, is compute-bound and much cheaper per token.
+
+</Recall>
+
+<Figure
+  name="token-cost-calculator"
+  interactive
+  title="What a million output tokens costs to serve"
+  caption="The inference lesson's roofline model turned into dollars. Pick a model, the number of sequences decoded together, the rental price of a GPU-hour and the share of paid hours the GPUs are busy. The dot shows cost per million output tokens on a log scale; the hollow dot is the same setup with no batching."
+  notice="Batching moves the dot by one to two orders of magnitude; the GPU price and utilisation move it by a factor of a few. The physics of decode, not the hourly price, dominates the cost of a token."
+/>
+
+<KeyIdea>
+
+A token's variable cost is a ratio: **the price of a GPU-hour ÷ tokens per GPU-hour.** Batching and utilisation set the denominator; the chokepoints beneath set the numerator. Training is a fixed cost that must be spread over every token the model serves before it is obsolete. Whoever controls the scarce link, not whoever does the serving, keeps the most stable margin.
+
+</KeyIdea>
+
+## Fixed cost: training
+
+<Recall id="pretraining">
+
+Training compute is about $6 \times \text{parameters} \times \text{training tokens}$ floating-point operations: 2 per parameter per token for the forward pass, and about twice that for the backward pass.
+
+</Recall>
+
+A 70-billion-parameter model trained on 15 trillion tokens needs $6 \times 7 \times 10^{10} \times 1.5 \times 10^{13} \approx 6 \times 10^{24}$ FLOP. An H100-class GPU running at 40% of its roughly $10^{15}$ FLOP/s peak delivers about $4 \times 10^{14}$ FLOP/s, so the run takes about 4.4 million GPU-hours, or roughly **\$9 million** at \$2 per GPU-hour. Frontier runs in 2025–26 used one to two orders of magnitude more compute, and the experiments and failed runs around them cost more again. Totals in the hundreds of millions to billions of dollars per generation are the common estimate (as of mid-2026).
+
+That cost is a <Term id="fixed-cost">fixed cost</Term>: the same whether the model serves one token or a quadrillion. Spread over more tokens, its share per token shrinks. If a \$500 million model serves $10^{15}$ tokens (a quadrillion) over its life, training adds \$0.50 per million tokens; at $10^{13}$ tokens it adds \$50. **Scale of use is what makes training affordable**, which is why the largest distributors, with products used by billions, have a structural advantage. Google, for example, said in 2025 that its products were processing over a quadrillion tokens a month.
+
+## Variable cost: serving
+
+Serving is the <Term id="marginal-cost">marginal cost</Term>, the cost of one more token. Its unit is the <Term id="gpu-hour">GPU-hour</Term>. For an H100-class chip, reported on-demand rental prices fell from as much as about \$8 per hour in 2023 to roughly \$2–3 by 2025 as supply caught up (market prices; large contracts differ).
+
+<Example title="one model, two ways of serving it">
+
+A 70B model on H100-class GPUs at **\$2 per GPU-hour**, busy **60%** of paid hours, 2,000 tokens of context per sequence (the calculator's idealised model):
+- **One sequence at a time:** 141 GB of weights need 2 GPUs; each decode step streams them in about 21 ms, so about **47 tokens/s**. Cost: 2 GPUs × \$2 ÷ (47 × 3,600 × 0.6) × $10^6$ ≈ **\$39 per million tokens**.
+- **128 sequences together:** weights plus KV caches need 3 GPUs, and each step now yields 128 tokens, about **5,700 tokens/s**. Cost ≈ **\$0.49 per million tokens**.
+
+Same model, same hardware, 80 times cheaper per token. Real systems reach less than this ideal, but the ratio is why providers obsess over batching and utilisation, and why a busy endpoint is far cheaper to run than a quiet one.
+
+</Example>
+
+The same physics explains price sheets. Input tokens are cheaper than output tokens because prefill is compute-bound and processes the whole prompt in one pass. Cached input is cheaper still because its keys and values already exist. Batch APIs, which accept a delay of hours, are discounted because they fill idle GPU time. Each discount passes on a way of raising tokens per GPU-hour.
+
+## Prices fall, spending rises
+
+<Figure
+  name="price-decline"
+  title="Two price curves"
+  caption="Illustrative, log scale. The band is the blended price of the newest frontier models, which has fallen far more slowly since 2023 and varies widely between them. The line is the cheapest price for a fixed level of capability, starting from GPT-4's launch price and falling about tenfold a year."
+  notice="Both are true at once: any given capability gets cheap fast, while the best model stays expensive. The premium window from the labs lesson is the gap between the two."
+/>
+
+The price of a fixed capability falls fast for four compounding reasons: chips deliver more per dollar with each generation; serving software packs more tokens into each pass (<LessonLink id="serving-at-scale" /> covers the techniques); smaller models reach capabilities that once needed large ones; and competition, including open-weight models served by many hosts, pushes prices towards cost.
+
+Yet total spending rises, for two reasons. First, cheaper tokens open new uses: when a useful input gets much cheaper, demand for it can grow by more than its price fell, the <Term id="jevons-paradox">Jevons paradox</Term>. Second, each task uses many more tokens. Reasoning models generate thousands of intermediate tokens before answering, and agents run loops of model calls, tool results and retries. **The price per token falls while the tokens per task rise**, so cost per task can stay flat or grow.
+
+<Example title="the flat-rate subscriber">
+
+A subscription costs **\$20 a month**. A light user sends a few hundred messages, perhaps 2 million tokens including context, which costs the provider well under \$20 at around \$1 per million tokens of blended internal cost. A heavy user running a coding agent all day can consume 50 million tokens or more: about **\$50**, more than they pay. Flat prices meet a heavy-tailed usage distribution; that is why labs added premium tiers around \$200 a month, usage limits, and per-token pricing for agents. (Illustrative numbers.)
+
+</Example>
+
+## Who keeps the margin
+
+Follow a token's price down the chain. The app pays the lab per token; the lab pays a cloud per GPU-hour; the cloud pays the chip designer for the accelerator. From the value-chain picture, margins stay where links are scarce and hard to route around.
+- **The chip designer** keeps a high and stable margin, because every token, cheap or expensive, runs on its hardware.
+- **Clouds** earn a return on GPU rental that rises and falls with its scarcity: high in 2023, much thinner once supply caught up.
+- **Labs** earn a real margin only on premium tokens, during the window. Once a capability is matched, its tokens are priced near their variable cost.
+- **Applications** built on models have lower gross margins than classic software, which typically keeps around 80%, because every use incurs an inference cost. Their margin depends on owning something the model provider cannot easily copy.
+
+## Reason with it
+
+**If price per token falls tenfold a year, why is total AI spending rising?** Because volume grows faster than price falls: new uses become affordable, and each task consumes far more tokens as reasoning and agents spread. Spending follows price × volume, and volume has so far won. The picture predicts when this could reverse: if cheaper capability stopped creating valuable new uses, volume growth would slow and spending would fall with price.
+
+**A lab sells a frontier model at \$10 per million output tokens; a host sells an open-weight model at \$0.20. Which earns more margin per token?** Most likely the lab, if its model is in its premium window, since its price is set by the lack of alternatives rather than by cost. The host's tokens are identical to other hosts' tokens, so competition pushes its price down to the cost of GPU-hours. But the lab's margin is temporary and must pay for training; the host has no training cost at all. The comparison that matters is margin after fixed costs, over the model's life.
+
+**Why do providers discount batch jobs and cached prompts?** Both raise tokens per GPU-hour without buying more GPUs. Waiting jobs fill idle hours and large batches; cached prefixes skip prefill that was already done. From the calculator, utilisation and batching are the cheapest levers a provider has.
+
+## Where this picture breaks
+
+- **The roofline is an ideal.** Real serving loses throughput to communication between GPUs, uneven request lengths and the need to keep latency low. It also needs spare capacity for peak hours. Our numbers are a floor on cost.
+- **GPU-hours are not the only variable cost.** Power, networking, storage, staff and the provider's own margin come on top. For owned hardware, the real cost of a GPU-hour depends on the useful-life question from the hyperscaler lesson.
+- **Prices are strategic.** Providers subsidise usage to win share, and price cuts can signal competition rather than cost. List prices also say little about large negotiated contracts.
+- **"Per token" is losing meaning.** With reasoning and agents, the useful unit is cost per completed task, which depends on how many tokens a model needs, not just their price.
+
+## Why it matters in the feed
+
+When a provider cuts prices by half, ask whether cost fell (new chips, better batching, a smaller model) or margin was given up to win share. When a lab reports revenue growth, set it against the token volumes and model generations behind it. When you see "Jevons paradox" in an argument about AI demand, you now know its mechanism, and what would make it fail. And when a hyperscaler's cloud margin moves, read it through GPU-hour scarcity.
+
+## Recap
+
+- A token's variable cost is **price of a GPU-hour ÷ tokens per GPU-hour**. Batching and utilisation, set by the decode physics from the inference lesson, move it by orders of magnitude.
+- Training is a **fixed cost**, about 6 × parameters × tokens FLOP, spread over every token served. Scale of use makes it affordable, as the labs' treadmill requires.
+- Price for a fixed capability falls about **tenfold a year**; frontier prices stay high; tokens per task rise. Spending grows when volume outruns price, the Jevons pattern.
+- Margins sit where links are scarce: steady for the chip designer, cyclical for clouds, temporary for labs, and thin for commodity tokens.

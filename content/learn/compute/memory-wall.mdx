@@ -1,0 +1,181 @@
+---
+id: memory-wall
+title: The memory wall and the roofline
+summary: A chip has two speeds, how fast it computes and how fast memory can feed it, and every workload has a ratio of operations per byte moved. The roofline puts the three together. It shows why so much AI work is memory-bound and why high-bandwidth memory matters as much as FLOPs.
+minutes: 12
+model: feeding-the-math
+buildsOn: [cpu, gpu]
+related: [inference, accelerators, distributed-training, semiconductors]
+keywords: ["memory wall", "HBM", "high-bandwidth memory", "memory bandwidth", "roofline", "arithmetic intensity", "HBM3E", "HBM4", "memory-bound", "FlashAttention"]
+quiz:
+  - question: A chip peaks at 1,000 TFLOP/s with 4 TB/s of memory bandwidth. A kernel performs 50 FLOPs per byte it moves. What throughput can it reach at best?
+    options:
+      - 1,000 TFLOP/s
+      - 200 TFLOP/s
+      - 50 TFLOP/s
+      - 4,000 TFLOP/s
+    answer: 1
+    explanation: The ridge point is 1,000 ÷ 4 = 250 FLOPs per byte, and 50 is below it, so the kernel is memory-bound. Memory delivers 4 TB/s, and each byte feeds 50 FLOPs, so the kernel reaches 4 × 50 = 200 TFLOP/s. That is 20% of peak; the arithmetic units wait the rest of the time.
+  - question: A newer chip keeps the same compute as its predecessor but raises memory bandwidth from 3.35 to 4.8 TB/s. Which workload speeds up the most?
+    options:
+      - Training with large batched matrix multiplies
+      - Generating text for a single user, one token at a time
+      - Both speed up by the same 43%
+      - Neither, because the FLOPs are unchanged
+    answer: 1
+    explanation: Single-user decode has an intensity of about 1 FLOP per byte, far below the ridge, so its speed is proportional to bandwidth and it gets about 43% faster. Large matrix multiplies sit above the ridge; they are limited by arithmetic, which did not change. This is why a memory upgrade can be marketed as an inference chip.
+  - question: Two elementwise operations run one after the other on a large tensor, each reading its input from memory and writing its output back. You fuse them into one kernel that reads once and writes once. What happens?
+    options:
+      - Nothing, because the FLOPs are the same
+      - It becomes about twice as fast, because the work is memory-bound and fusion halves the bytes moved
+      - It becomes slower, because one kernel does more work
+      - It only helps on CPUs
+    answer: 1
+    explanation: Elementwise operations do a few FLOPs per byte, far below any GPU's ridge, so their time is bytes ÷ bandwidth. Fusing removes the intermediate write and read, halving the traffic while keeping the arithmetic. Raising intensity this way is the whole idea behind fused kernels such as FlashAttention.
+  - question: A kernel with an intensity of 200 FLOPs per byte moves from an A100 (312 TFLOP/s, 2.04 TB/s) to an H100 (989 TFLOP/s, 3.35 TB/s). The H100 has about 3.2 times the FLOPs. How much faster does the kernel get?
+    options:
+      - About 3.2 times, like the FLOPs
+      - About 2.1 times, because it was compute-bound on the A100 but becomes memory-bound on the H100
+      - About 1.6 times, like the bandwidth
+      - It gets slower
+    answer: 1
+    explanation: The A100's ridge is about 153, so at 200 the kernel ran at the A100's peak of 312 TFLOP/s. The H100's ridge is about 295, so the same kernel is now below it and reaches 200 × 3.35 = 670 TFLOP/s. 670 ÷ 312 ≈ 2.1. As the ridge moves right with each generation, workloads that used to be compute-bound become memory-bound.
+---
+
+Spec sheets for AI chips lead with one number: peak FLOP/s. Yet an H100 generating text for one user uses well under 1% of it, and a newer chip with the *same* FLOPs but faster memory can run that job almost half as fast again. The missing piece is the rate at which memory can feed the arithmetic. Computer architects have called the gap between the two the **memory wall** since the 1990s, and it has been getting higher ever since.
+
+This lesson gives you the tool that the rest of the path uses to reason about any workload on any chip: the **roofline**.
+
+## The picture
+
+<Recall id="cpu">
+
+Memory has two properties: **latency**, how long one request takes, and **bandwidth**, how many bytes per second arrive when many requests are in flight. A desktop CPU can do about a trillion operations per second but can only stream about 80 GB/s from DRAM, so each 4-byte number fetched has to be used about fifty times to keep the arithmetic busy.
+
+</Recall>
+
+<Recall id="gpu">
+
+A GPU hides memory *latency* by keeping hundreds of thousands of threads in flight, so waiting stops mattering. But it cannot hide a shortage of *bandwidth*. With a batch of 2,048 tokens a layer kept the arithmetic busy; with a single token the same layer spent nearly all its time streaming weights.
+
+</Recall>
+
+Put both halves together. A chip has two speeds:
+- **Compute:** peak arithmetic, in FLOP/s. For an H100 in 16-bit BF16, about 990 TFLOP/s.
+- **Memory bandwidth:** how fast bytes arrive from main memory. For an H100, about 3.35 TB/s.
+
+A workload has one number, its <Term id="arithmetic-intensity">arithmetic intensity</Term>: how many operations it performs per byte it moves to or from memory. If the moving and the computing overlap perfectly, the work takes whichever is longer:
+
+$$
+\text{time} = \max\!\left(\frac{\text{FLOPs}}{\text{peak FLOP/s}},\ \frac{\text{bytes}}{\text{bandwidth}}\right),
+\qquad
+\text{attainable FLOP/s} = \min(\text{peak},\ \text{intensity} \times \text{bandwidth}).
+$$
+
+Plotted on log axes, that second expression is the <Term id="roofline-model">roofline</Term>. It is a slanted line (bandwidth × intensity) that meets a flat roof (peak). Where they meet is the <Term id="ridge-point">ridge point</Term>, peak ÷ bandwidth. For an H100 it is 990 ÷ 3.35 ≈ **300 FLOPs per byte**. Below the ridge a workload is <Term id="memory-bound">memory-bound</Term>: the arithmetic units wait for data, and more bandwidth would speed it up. Above it the workload is <Term id="compute-bound">compute-bound</Term>, and only more arithmetic would help.
+
+<Figure
+  name="roofline"
+  interactive
+  title="The roofline: where does your workload land?"
+  caption="Attainable throughput against arithmetic intensity, both on log scales. Pick a chip and a workload, or drag the slider. Grey lines are the other chips."
+  notice="Single-user decode, at 1 FLOP per byte, gets a fraction of a percent of an H100’s peak. Then switch chips: from V100 to H100, the ridge moves right, so a workload needs more reuse just to stay compute-bound."
+/>
+
+<KeyIdea>
+
+**Intensity decides which limit you hit.** Below the ridge point (about 300 FLOPs per byte on an H100), a workload runs at bandwidth × intensity and the arithmetic sits idle. Above it, the chip runs at peak. To speed up a memory-bound job, move fewer bytes or reuse each byte more; to speed up a compute-bound job, do less arithmetic or buy more.
+
+</KeyIdea>
+
+## Working out arithmetic intensity
+
+You can estimate intensity with pencil and paper: count the FLOPs, count the bytes that must cross from memory at least once. With 16-bit numbers (2 bytes each):
+
+| Operation | FLOPs | Bytes moved | Intensity |
+|---|---|---|---|
+| Add two vectors of length $n$ | $n$ | $6n$ (read 2, write 1) | ≈ 0.17 |
+| Matrix ($d \times d$) × one vector | $2d^2$ | ≈ $2d^2$ (the matrix) | ≈ 1 |
+| Matrix × a batch of $B$ vectors | $2Bd^2$ | ≈ $2d^2$ when $B \ll d$ | ≈ $B$ |
+| Square matmul, $n \times n$ by $n \times n$ | $2n^3$ | $6n^2$ (read 2, write 1) | $n/3$ |
+
+The pattern is **reuse**. An elementwise operation touches each number once, so it can never be anything but memory-bound. A matrix-vector product uses each weight once. A matrix-matrix product uses each number $n$ times, so its intensity grows with size.
+
+<Example title="three workloads on an H100">
+
+- **Vector add**, 100 million elements: 100 MFLOP, 600 MB. Memory time 600 MB ÷ 3.35 TB/s ≈ 0.18 ms; the arithmetic alone would take 0.1 µs. The chip reaches 0.17 × 3.35 ≈ 0.56 TFLOP/s, about **0.06% of peak**.
+- **Matmul, n = 512:** 268 MFLOP, 1.6 MB, intensity ≈ 171. Below the ridge, so it reaches 171 × 3.35 ≈ 570 TFLOP/s, about **58% of peak**.
+- **Matmul, n = 4,096:** 137 GFLOP, 101 MB, intensity ≈ 1,365. Well above the ridge: compute takes 0.14 ms and memory only 0.03 ms, so it runs **at peak**.
+
+</Example>
+
+These are best cases. They assume every byte crosses from memory exactly once, which a real kernel only achieves by tiling the work so that data is reused from on-chip memory, as in the CPU lesson. Much of the craft of writing GPU kernels is about getting close to these ideal byte counts.
+
+## HBM: bandwidth and capacity
+
+The GPU's bandwidth comes from <Term id="hbm">high-bandwidth memory</Term> (HBM). It is DRAM, the same kind of memory cell as in a laptop, arranged differently.
+
+<Figure
+  name="hbm-package"
+  title="Why HBM is fast: many short wires"
+  caption="HBM stacks sit beside the GPU die on a shared slab of silicon. Each stack is several DRAM dies joined by vertical connections, and talks to the GPU over about a thousand wires a few millimetres long."
+  notice="The speed per wire is about the same as ordinary DRAM. Bandwidth comes from width: 1,024 wires per stack against 64 for a DDR5 channel."
+/>
+
+Keep two properties of HBM apart:
+- **Capacity** decides *what fits*: the weights, the activations, the caches. An H100 has 80 GB.
+- **Bandwidth** decides *how fast you can read it*: 3.35 TB/s.
+
+Divide one by the other: an H100 can read its entire memory about once every **24 ms**, about 42 times a second. Chips that followed it grew both numbers (an H200 has 141 GB at 4.8 TB/s, a B200 about 180 GB at about 8 TB/s), and each still takes some 20–30 ms to read everything once. That number sets a hard floor on anything that has to touch all of memory per step, such as generating the next token.
+
+HBM is expensive per gigabyte, made by only three companies, and has to be bonded next to the processor using <Term id="advanced-packaging">advanced packaging</Term>. Its supply has repeatedly limited how many AI chips could be built (<Preview id="semiconductors">more on that chokepoint</Preview>).
+
+## Why the wall keeps rising
+
+The ridge point is not fixed. It has moved right in almost every chip generation:
+
+| Chip (year) | 16-bit TFLOP/s | TB/s | Ridge (FLOPs/byte) |
+|---|---|---|---|
+| V100 (2017) | 125 | 0.9 | ≈ 140 |
+| A100 (2020) | 312 | 2.0 | ≈ 150 |
+| H100 (2022) | 990 | 3.35 | ≈ 300 |
+| B200 (2024) | ≈ 2,250 | ≈ 8 | ≈ 280 |
+
+The B200 held the 16-bit ridge roughly level by carrying more HBM stacks, but its 8-bit and 4-bit arithmetic push its ridge to about 560 and 1,100. Over the long run, one analysis of the past two decades found peak compute growing about 3× every two years against about 1.6× for DRAM bandwidth.
+
+The reason is geometric. Arithmetic scales with the number of transistors, which grows with chip area and process shrinks. Bandwidth is limited by how many wires can leave the chip, which grows with its *edge*, and by the energy it costs to push each bit down a wire. HBM is a way around the edge limit, placing memory millimetres away so that thousands of wires become practical. It raises the wall; it does not remove it.
+
+So software fights the wall by raising intensity: batching many inputs so each weight is reused, tiling, and <Term id="kernel-fusion">fusing</Term> operations so that intermediate results stay on chip instead of making a round trip to HBM. FlashAttention, for example, computes attention without ever writing its large intermediate score matrix to memory.
+
+<Caution>
+
+Spec sheets often quote "sparse" TFLOP/s, which assume a special pattern of zeros in the weights and are twice the dense figure. Use dense numbers for a roofline unless you know the workload is sparse.
+
+</Caution>
+
+## Reason with it
+
+**Why does one user chatting with a model on an H100 use under 1% of its FLOPs?** Generating a token multiplies every weight matrix by a single vector: intensity about 1. The roofline gives 1 × 3.35 = 3.35 TFLOP/s, about 0.3% of peak. Reaching the ridge would need about 300 users' tokens sharing each pass over the weights. That single calculation is the starting point of <Preview id="inference">inference</Preview>.
+
+**Why can fusing two simple operations make them almost twice as fast?** Each elementwise operation reads its input from HBM and writes its output back. Both are far below the ridge, so their time is simply bytes ÷ bandwidth. Fused, the intermediate never leaves the chip: the arithmetic is the same and the bytes are halved, so the time is halved.
+
+**A new chip doubles FLOPs but keeps the same bandwidth. Who benefits?** Only compute-bound work: large-batch training and the prompt-reading phase of inference, where big matrix multiplies sit above the ridge. Memory-bound work, such as generating tokens for a few users, elementwise operations and normalisations, gains nothing. Worse, the ridge doubles, so some workloads that used to be compute-bound become memory-bound.
+
+## Where this picture breaks
+
+- **There is more than one roof.** Data moves between several levels (HBM, L2 cache, on-chip scratchpad, registers), and each has its own bandwidth and its own roofline. A kernel can be limited by L2 bandwidth even when its HBM traffic looks fine.
+- **Not all arithmetic is peak arithmetic.** The flat roof is for dense matrix math on specialised units. Operations such as exponentials in softmax run on slower units with a much lower roof.
+- **Overlap and latency are assumed away.** The model assumes compute and memory traffic overlap perfectly. Small kernels, synchronisation and launch overheads often leave a chip below both roofs.
+- **Chips talk to each other.** Once work is split across many GPUs, the links between them become another pipe with its own, much lower, bandwidth: the same wall, one level up (more in <Preview id="distributed-training">distributed training</Preview>).
+
+## Why it matters in the feed
+
+When memory makers announce a new generation of HBM (HBM3E, HBM4) with more stacks, more layers or faster pins, this lesson is why AI chip buyers care: for memory-bound inference, bandwidth is speed. When a chip is launched with the same compute as its predecessor but more and faster HBM, it is aimed at inference. When a paper claims a speed-up from a "fused" or "IO-aware" kernel, it is moving the workload right along the roofline by cutting bytes, not FLOPs. And when you read that HBM or advanced packaging is sold out, you now know why that constrains the whole AI build-out.
+
+## Recap
+
+- A chip has two speeds, **peak FLOP/s** and **memory bandwidth**; a workload has an **arithmetic intensity**, operations per byte moved.
+- **Attainable = min(peak, intensity × bandwidth).** The ridge point (peak ÷ bandwidth, about 300 for an H100) separates memory-bound from compute-bound.
+- Intensity comes from **reuse**. Elementwise operations and single-token matrix-vector products sit far below the ridge; big batched matrix multiplies sit above it. This is the GPU lesson's one-token versus batch contrast, now with numbers.
+- **HBM** gets its bandwidth from width, thousands of short wires to stacked DRAM. Capacity decides what fits, bandwidth how fast you can read it.
+- Compute has grown faster than bandwidth for decades, so the ridge keeps moving right. That is the memory wall, and it is why arithmetic is cheap and moving data is what costs.

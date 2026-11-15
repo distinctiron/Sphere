@@ -1,0 +1,161 @@
+---
+id: hyperscalers
+title: Hyperscalers and the capex boom
+summary: The cloud giants and neoclouds that turn capital into compute. How big the spending is, why chip depreciation sits at the heart of the ROI debate, and how circular deals between suppliers, clouds and labs work, described even-handedly.
+minutes: 12
+model: follow-the-bottleneck
+buildsOn: [value-chain]
+related: [data-center, hosting, semiconductors, labs, unit-economics, buildout]
+keywords: ["hyperscaler", "capex", "capital expenditure", "data center spending", "depreciation", "neocloud", "CoreWeave", "circular financing", "AI bubble", "Stargate"]
+reviewed: 2026-09-29
+quiz:
+  - question: A hyperscaler depreciates its accelerators over six years, but they stop earning much after three. What does that do to its reported profits in the first three years?
+    options:
+      - Nothing, because cash was already spent
+      - Reported profits are higher than the economic reality, because only half of the true yearly cost is expensed; the gap shows up later as a write-down or as years of depreciation with little revenue
+      - Reported profits are lower than reality
+      - Taxes on the chips fall to zero
+    answer: 1
+    explanation: Depreciation spreads the purchase price over the assumed useful life. With a six-year life, one sixth of the cost is expensed each year, but if the chips really earn for three years, a third of the cost is consumed each year. Profits look better early, and the unexpensed book value has to be dealt with later. Cash flow is unchanged either way, which is why analysts look at both.
+  - question: Why is Meta's AI capex arguably a different kind of bet from Microsoft's or Amazon's?
+    options:
+      - Meta buys different chips
+      - Meta has no public cloud to rent capacity to, so the return must come through its own products, while cloud providers can rent spare capacity to others
+      - Meta does not need power for its data centers
+      - Meta's data centers do not use accelerators
+    answer: 1
+    explanation: A cloud provider has two routes to a return, its own products and renting capacity to customers, so unused capacity can be sold. Meta's return must come from improving its own apps and ads or from new products. That concentrates the bet on its internal use, though it also means it does not compete for cloud customers.
+  - question: A chip supplier invests in a lab, the lab signs a multi-year compute contract with a neocloud, and the neocloud borrows against that contract to buy the supplier's chips. What is the most important number for judging whether this is sound?
+    options:
+      - The size of the supplier's equity investment
+      - How much revenue from paying end customers flows into the lab, relative to its compute commitments
+      - The neocloud's share price
+      - The number of chips in each data center
+    answer: 1
+    explanation: Inside the loop, the same money can show up as investment, contract value and chip revenue. Only customer revenue enters from outside. If the lab's revenue grows to cover its commitments, the loop is ordinary vendor financing that sped up growth. If it does not, every party is exposed to the same shortfall at once.
+  - question: Using the bottleneck picture from the value-chain lesson, why might hyperscalers accept lower margins on AI compute than on their classic cloud services?
+    options:
+      - They have no choice because chips are free
+      - They pay a large share of their spending to a chokepoint supplier with high margins, and they compete with each other and with neoclouds to rent out compute, so they sit between a scarce input and a competitive market
+      - Regulations cap cloud prices
+      - AI workloads use less electricity
+    answer: 1
+    explanation: Margins flow to links that are scarce and hard to route around. When accelerators are the costliest input and their supplier has high margins, and several clouds and neoclouds offer similar GPU capacity, the cloud's own margin is squeezed from both sides. That is one reason hyperscalers design their own chips and secure power, so as to own more of the scarce links themselves.
+---
+
+In 2025 four American companies, Microsoft, Alphabet, Amazon and Meta, spent roughly **\$400 billion** between them on capital expenditure, mostly on data centers and the chips inside them, and in early 2026 guided to substantially more for 2026. It is one of the largest private investment waves in modern history, and it is why chip, power and construction companies keep reporting records.
+
+Is it rational? This lesson gives you the pieces to judge for yourself: what the money buys, how long the purchases last, how the spending is financed, and what has to be true for it to pay off.
+
+## The picture
+
+<Recall id="value-chain">
+
+The AI chain runs from tools and fabs through chip design, systems and cloud to labs and applications. Output is capped by the scarcest link, margins go to links that are scarce and hard to route around, and **demand** at the top is the link every other layer's revenue depends on.
+
+</Recall>
+
+<Term id="hyperscaler">Hyperscalers</Term> sit in the middle of that chain. They take in capital and buy from the chokepoints below them (accelerators, memory, packaging and increasingly power), and they turn all of it into **powered, networked compute** that labs and customers rent or use. Their bet has two sides:
+- **They are buying time on the scarce links.** Whoever has chips, sites and power ready when demand arrives captures it. Late builders wait years for grid connections.
+- **They are betting on the top link.** Every dollar of <Term id="capex">capex</Term> must eventually be earned back from customers paying for AI, within the life of the hardware.
+
+<Figure
+  name="capex-bars"
+  title="Combined capex of the four largest US hyperscalers"
+  caption="Approximate combined capital expenditure of Microsoft, Alphabet, Amazon and Meta by calendar year, rounded, from company reports. 2026 is guidance given in early 2026; later revisions are not reflected. All capex, not only AI, but AI data centers drove the jump."
+  notice="Spending roughly flat from 2022 to 2023, then up about 1.7× in 2024, 1.6× in 2025, and guided to rise by a similar factor again: growth that compounds, not a one-off step."
+/>
+
+<KeyIdea>
+
+A hyperscaler converts capital into compute capacity **now** and earns it back **over the hardware's life**. The whole ROI debate reduces to two numbers: how much revenue each dollar of compute generates per year, and for how many years it keeps generating it. The chain above sets the first; the pace of chip generations sets the second.
+
+</KeyIdea>
+
+## Who is building, and how
+
+- **Microsoft** rents capacity through Azure and was OpenAI's main compute partner, holding a large stake after OpenAI's 2025 restructuring.
+- **Alphabet (Google)** designs its own TPUs, runs Google Cloud and trains Gemini, so it owns more links of the chain than anyone else.
+- **Amazon** runs AWS, designs Trainium chips, and is Anthropic's primary cloud and training partner.
+- **Meta** has no public cloud. It builds for its own products (ranking and ads, assistants, its model efforts), so all of its return must come through them.
+- **Oracle** came late and grew by signing very large multi-year contracts, above all with OpenAI, reporting a contract backlog in the hundreds of billions of dollars in 2025 and funding the build-out largely with debt.
+- <Term id="neocloud">Neoclouds</Term> such as CoreWeave (listed in 2025), Nebius, Lambda and Crusoe rent GPU capacity with a narrower offer. They typically sign long contracts with a few large customers and borrow against those contracts, using the GPUs themselves as collateral.
+
+Roughly speaking, a large share of AI capex buys chips and servers, which age in years, and the rest buys land, buildings, cooling and power connections, which last decades. That split matters, because it determines how fast the investment loses value.
+
+Contract backlogs are a common signal in this industry. A provider's <Term id="contract-backlog">backlog</Term> (reported as remaining performance obligations) counts revenue customers have committed to but not yet paid. It is real demand, but it is also concentrated: a large share can come from one or two customers whose own funding depends on growth continuing.
+
+## Depreciation: the number at the heart of the debate
+
+Capex does not hit profits the year it is spent. An accountant spreads the cost over the asset's assumed <Term id="useful-life">useful life</Term>; the yearly charge is <Term id="depreciation">depreciation</Term>. Between 2020 and 2024, several hyperscalers lengthened the useful life of their servers to about six years, reasoning that their fleets were lasting longer. In 2025 Meta used five and a half years, while Amazon shortened some of its servers back to five years, citing the pace of AI change.
+
+For accelerators, the question is sharp. Nvidia now ships a major new generation roughly every year, each offering much more performance per dollar and per watt. Rental prices for older chips have fallen steeply: an H100 hour that could cost as much as about \$8 on demand at the 2023 peak was widely offered for roughly \$2–3 by 2025 (reported market prices; contract rates differ). Critics argue that the **economic life**, the years a chip earns more than its running costs, may be closer to three years than six. Defenders reply that older chips remain in heavy use for inference and smaller models, and that demand has absorbed each previous generation.
+
+<Figure
+  name="capex-payback"
+  interactive
+  title="What useful life does to the numbers"
+  caption="$100bn of accelerators and servers. Top: depreciation booked each year over the accounting life. Bottom: the cost that must actually be earned back each year over the economic life. The readout adds the cash return needed to recover the money with a cost of capital."
+  notice="Set a six-year accounting life and a three-year economic life. Reported profit looks better while the chips earn, and half the cost is still on the books when they stop."
+/>
+
+<Example title="$100 billion of accelerators">
+
+- **Six-year life:** depreciation is \$100bn ÷ 6 ≈ **\$16.7bn** a year.
+- **Three-year life:** it is \$100bn ÷ 3 ≈ **\$33.3bn** a year, twice as much.
+- To recover \$100bn plus an 8% cost of capital in three years, the fleet must generate about **\$38.8bn** a year of gross profit (the annuity $100 \times 0.08 / (1 - 1.08^{-3})$), before power and staff. Over six years, about \$21.6bn a year.
+
+Nothing about cash changes with the choice of accounting life: the \$100bn was spent up front. What changes is how profitable the investment *looks*, and so how the market values it, how much the company can borrow, and when a write-down arrives if the chips age faster than assumed.
+
+</Example>
+
+## The ROI debate, even-handedly
+
+**The case for the spending.** Usage has grown very fast: providers report token volumes rising many-fold in a year, and cloud revenue growth re-accelerated in 2025 at Microsoft, Google and Amazon. Backlogs are large. Executives have said publicly that they see under-investing, and losing a generational platform shift, as the larger risk. And most of the four can fund much of their capex from operating cash flow.
+
+**The case for caution.** Revenue from AI products is still far smaller than the capital being deployed. In 2024 a Sequoia partner framed this as a revenue gap of hundreds of billions of dollars a year that AI would need to fill. Depreciation charges will rise sharply as recent purchases hit the income statement. Borrowing has increased, including off-balance-sheet structures for single campuses. And the history of infrastructure booms, from railways to the fibre-optic build-out of the late 1990s, is that capacity can be socially useful while many of its first investors lose money.
+
+Both sides can be partly right: demand can grow fast and still arrive later than the hardware's economic life.
+
+## Circular financing
+
+A newer feature of the boom is deals in which money moves in a loop between suppliers, clouds and labs. In 2025, for example, Nvidia announced it would invest up to \$100 billion in OpenAI as OpenAI deployed Nvidia systems; AMD gave OpenAI warrants to buy AMD shares alongside a chip-supply deal; Nvidia held a stake in CoreWeave and agreed to buy unused capacity from it; and Amazon and Google invested in Anthropic, which buys large amounts of their cloud capacity. Some of these were letters of intent, with terms to be finalised.
+
+<Figure
+  name="circular-financing"
+  title="The loop, and the one flow from outside it"
+  caption="A stylised version of the pattern. A chip supplier invests in a lab (1). The lab commits to buying compute from a cloud (2), which borrows against that contract and buys chips from the supplier (3), who books the revenue. Money from end customers enters the loop at only one point."
+  notice="The same dollars appear three times: as investment, as contract value and as chip revenue. Only the green flow is new money."
+/>
+
+This is <Term id="circular-financing">circular financing</Term>, a form of vendor financing.
+- **Supporters' view:** it is normal for a supplier to help finance its customers when both benefit from growth. It aligns incentives, it is backed by real equity at risk, and it speeds up building capacity that is genuinely scarce.
+- **Critics' view:** it can make demand look larger and more diversified than it is, and it ties every party's fate to the same few customers. It invites comparisons with equipment makers who lent to their own customers in the telecom boom of 2000, and lost heavily when those customers failed.
+
+The test is the green arrow: whether revenue from paying customers grows into the commitments.
+
+## Reason with it
+
+**If accelerators really last three years, not six, what changes?** Depreciation on the chip portion roughly doubles, so reported earnings fall, and some past purchases would need writing down. Cash already spent does not change. What changes is valuations, borrowing capacity, and, crucially, the price at which chips must be rented to pay back. That rental price feeds straight into the <Preview id="unit-economics">cost of every token</Preview>.
+
+**Why is Meta's capex a different bet from Microsoft's?** Microsoft can rent any capacity it does not need to cloud customers; Meta can only use it itself. Meta's return must come from better ads, engagement or new products. That makes its bet more concentrated, but it also means it is not competing to rent GPUs at falling prices.
+
+**A neocloud borrows against a five-year contract with one lab. What single event hurts most?** The lab failing to pay, or renegotiating. The debt is secured on the contract and the GPUs, but the GPUs lose value quickly, so the collateral shrinks just when it is needed. Concentrated customers plus fast-depreciating collateral is the combination lenders watch.
+
+## Where this picture breaks
+
+- **Capex is not all AI.** The figures include warehouses, offices, networks and classic cloud servers. The AI share is large and rising but is not separately reported.
+- **Hyperscalers are not only middlemen.** Google and Amazon also design chips and back labs, and Meta and Google train their own models. For them, capex buys positions in several links at once.
+- **Efficiency cuts both ways.** Cheaper training or serving methods reduce the compute needed per task, but, as <Preview id="unit-economics">the unit-economics lesson</Preview> shows, falling prices have so far expanded usage.
+- **Power is becoming the binding link.** Much of 2026 spending goes to sites and power that last decades. If chip generations slow down, the depreciation debate eases; if power stays scarce, the owners of powered sites gain leverage regardless of which chips they hold.
+
+## Why it matters in the feed
+
+When a hyperscaler raises its capex guidance, compare it with the growth of its cloud revenue and its backlog. When you read about a change in "useful life" assumptions, you are reading about reported profits, not cash. When a supplier invests in a customer that buys its products, ask how much outside revenue sits behind the deal. And when a neocloud raises debt, look at how concentrated its customers are and what the collateral will be worth in three years.
+
+## Recap
+
+- Hyperscalers and neoclouds turn capital into powered compute. Combined capex of the four largest US hyperscalers went from roughly \$150bn in 2023 to roughly \$400bn in 2025, with guidance for much more in 2026 (as of mid-2026).
+- They buy from the chokepoints beneath them and bet on the demand link above them, as in the value-chain picture.
+- The ROI debate turns on **revenue per dollar of compute** and **how many years** the chips earn it. Depreciation choices change reported profit, not cash.
+- **Circular financing** moves the same money around a loop; only end-customer revenue enters from outside. Supporters see normal vendor financing, critics see correlated risk.

@@ -1,0 +1,193 @@
+---
+id: backpropagation
+title: Backpropagation
+summary: How a network finds the downhill direction for billions of parameters at once. Error signals flow backwards through the layers, the chain rule turns them into a gradient for every weight, and the whole sweep costs only about twice the forward pass.
+minutes: 12
+model: loss-landscape
+buildsOn: [derivatives, forward-pass, gradient-descent]
+related: [memory-wall, distributed-training]
+keywords: ["backpropagation", "backprop", "backward pass", "automatic differentiation", "autograd", "vanishing gradients", "exploding gradients", "gradient clipping", "activation checkpointing", "computational graph"]
+quiz:
+  - question: Why don't we compute the gradient by nudging each parameter slightly and re-running the network to see how the loss changes?
+    options:
+      - The answer would be inaccurate, because nudges are never small enough
+      - It needs one extra forward pass per parameter, so billions of passes per step, while backpropagation gets every partial derivative for about the cost of two forward passes
+      - Nudging parameters is not allowed during training
+      - It only works for ReLU networks
+    answer: 1
+    explanation: Nudging works in principle (it is how you check a backprop implementation), but each nudge tells you about one parameter only. A 7-billion-parameter model would need 7 billion forward passes for one step. Backprop reuses the shared downstream part of every chain, so one backward sweep delivers all 7 billion numbers at once.
+  - question: A lab trains a 7-billion-parameter model on 2 trillion tokens. Using the rule of thumb from this lesson, roughly how much compute does training take?
+    options:
+      - About 2.8 × 10²² FLOPs (2 × parameters × tokens)
+      - About 8.4 × 10²² FLOPs (6 × parameters × tokens)
+      - About 1.4 × 10¹⁰ FLOPs (2 × parameters)
+      - It cannot be estimated without knowing the learning rate
+    answer: 1
+    explanation: The forward pass costs about 2 FLOPs per parameter per token. The backward pass does two matrix multiplies per layer (one for the weight gradients, one for the signal to pass down), about 4 per parameter per token. Together that is 6 × 7×10⁹ × 2×10¹² ≈ 8.4 × 10²² FLOPs. The 2× figure is the cost of inference only.
+  - question: For one training example, a ReLU neuron in a hidden layer outputs exactly zero. What gradient do its incoming weights receive from that example?
+    options:
+      - Zero, because the ReLU is flat there, so no error signal passes back through it
+      - The largest gradient in the layer, because the neuron was wrong
+      - The same as every other neuron in the layer
+      - A random gradient, to wake the neuron up
+    answer: 0
+    explanation: The signal reaching a neuron's weighted sum is the signal at its output times the ReLU's local slope, which is 0 when the neuron is off. So its incoming weights get no update from that example. If a neuron is off for every example it never learns again, which is the "dead ReLU" problem.
+  - question: In a 40-layer network, the backward signal shrinks by a factor of about 0.85 per layer, so the first layer's gradient is about 0.002 times the last layer's. Which fix does the picture suggest?
+    options:
+      - Raise the learning rate until the first layer learns at a normal speed
+      - Change the architecture so each layer's factor is close to 1, for example with residual connections, careful initialisation or normalisation
+      - Train for more epochs
+      - Remove the activation functions
+    answer: 1
+    explanation: The learning rate scales every layer's step equally. Raising it enough to help layer 1 (several hundred times) would make the last layers' steps wildly too large and training would diverge. The problem is the product of per-layer factors, 0.85³⁹ ≈ 0.0018, so the cure is to keep each factor near 1. Removing activations would make the network linear.
+---
+
+Gradient descent moves every parameter a small step downhill. But "downhill" is a direction in a space with one axis per parameter, and a large language model has tens or hundreds of billions of them. Every step needs the slope along every one of those axes, computed afresh for the current batch. If that took one forward pass per parameter, no model larger than a toy could ever be trained.
+
+**Backpropagation** is the algorithm that makes it cheap. It delivers the whole gradient, every partial derivative at once, for about twice the cost of running the network forwards. It is the reason training a model costs roughly three times as much per token as running it, and the source of some familiar training problems, such as gradients that vanish or explode.
+
+## The picture
+
+<Recall id="gradient-descent">
+
+The model's parameters are a location on the loss landscape and the loss is the height. Each training step moves every parameter against the gradient, $\theta \leftarrow \theta - \eta \nabla L$, where $\nabla L$ holds one slope per parameter, estimated on a mini-batch.
+
+</Recall>
+
+So every step needs the slope in every direction. The slope along one parameter's axis answers one question: *if I nudge this weight, how much does the loss move?*
+
+A network answers all those questions together if you let the answer flow **backwards**. The loss sits at the end of a long chain of computations. Its sensitivity to the network's outputs is easy to write down. Each layer then receives a signal meaning "this is how much the loss cares about your output" and does two things with it:
+
+1. It turns that signal into **gradients for its own weights**: a weight matters in proportion to the signal at its output end times the value that flowed through it on the way forward.
+2. It turns the signal into **the same kind of signal for the layer below** and passes it on.
+
+The forward pass carries values from input to loss. The <Term id="backpropagation">backward pass</Term> carries sensitivities from the loss back to the input, and every weight picks up its gradient as the signal passes by.
+
+<Figure
+  name="backward-pass"
+  title="Values flow forward, error signals flow back"
+  caption="The same kind of 3 → 4 → 4 → 2 network as the forward-pass figure, computed for real. Forward (rose): each layer's values are computed and kept. The loss compares the output with the target. Backward (amber): the error signal δ reaches each layer in turn, and every weight's gradient appears as the product of the signal at its output end and the stored value at its input end. Ring and edge thickness show size within each layer."
+  notice="The neurons drawn with a dashed outline output 0 on the way forward. Nothing flows back through them, so their incoming weights get no gradient from this example."
+/>
+
+<KeyIdea>
+
+Backpropagation computes the loss's sensitivity to every intermediate value, starting from the loss and moving backwards, and each step reuses the one before it. Because every weight shares the long downstream part of its chain with all the other weights in its layer, one backward sweep delivers the whole gradient. It costs about two forward passes, not one per parameter.
+
+</KeyIdea>
+
+## The chain rule, run backwards
+
+<Recall id="derivatives">
+
+The chain rule: sensitivities multiply along a chain. If a nudge to $x$ moves $y$ by $\tfrac{dy}{dx}$ per unit, and a nudge to $y$ moves $z$ by $\tfrac{dz}{dy}$ per unit, then a nudge to $x$ moves $z$ by $\tfrac{dz}{dy} \cdot \tfrac{dy}{dx}$ per unit.
+
+</Recall>
+
+Write the network as a <Term id="computational-graph">computational graph</Term>: every multiply, add and activation is a node, and edges show which values feed which. The forward pass evaluates the graph from inputs to loss and **keeps every intermediate value**. The backward pass visits the same nodes in reverse. At each node it multiplies the incoming sensitivity by that node's local derivative, which is simple for each operation on its own. The derivative of $a \cdot b$ with respect to $a$ is $b$, and the derivative of a ReLU is 1 where it was on and 0 where it was off.
+
+The order is what makes it efficient. Going backwards, you reach each node already knowing how much the loss cares about its output; one local derivative later, you know how much it cares about the node's input. The downstream part of the chain is never recomputed.
+
+One more rule completes the picture. If a value feeds several places, its sensitivity is the **sum** of the sensitivities coming back along each path, because a nudge to it moves the loss through all of them at once.
+
+<Example title="two weights, by hand">
+
+Take one input, one hidden ReLU neuron and one output: $x = 1.5$, $h = \mathrm{ReLU}(w_1 x)$, $y = w_2 h$, loss $L = \tfrac12 (y - t)^2$, with $w_1 = 2$, $w_2 = 0.5$ and target $t = 0.5$.
+
+**Forward, keeping every value:** $w_1 x = 3$, so $h = 3$, then $y = 1.5$ and $L = \tfrac12 (1)^2 = 0.5$.
+
+**Backward:**
+
+| step | local rule | value |
+|---|---|---|
+| $\tfrac{\partial L}{\partial y}$ | $y - t$ | 1 |
+| $\tfrac{\partial L}{\partial w_2}$ | $\tfrac{\partial L}{\partial y} \cdot h$ | 3 |
+| $\tfrac{\partial L}{\partial h}$ | $\tfrac{\partial L}{\partial y} \cdot w_2$ | 0.5 |
+| $\tfrac{\partial L}{\partial w_1}$ | $\tfrac{\partial L}{\partial h} \cdot 1 \cdot x$ (ReLU on) | 0.75 |
+
+**Check by nudging.** Raise $w_1$ to 2.01: $h = 3.015$, $y = 1.5075$, $L = 0.50753$. The loss rose by 0.0075, which is $0.75 \times 0.01$. Raise $w_2$ to 0.51 instead: $L$ rises by 0.030, which is $3 \times 0.01$. Notice that $\tfrac{\partial L}{\partial h}$ was computed once and would be reused by every weight feeding into $h$.
+
+</Example>
+
+## One layer, both directions
+
+<Recall id="forward-pass">
+
+A layer computes $\mathbf{z} = W\mathbf{x} + \mathbf{b}$ and then $\mathbf{h} = \mathrm{ReLU}(\mathbf{z})$: one matrix multiply, then a fold. The forward pass costs about 2 FLOPs per parameter per input, because every weight is used once for a multiply and an add.
+
+</Recall>
+
+Call the signal arriving at a layer's weighted sum $\boldsymbol{\delta} = \tfrac{\partial L}{\partial \mathbf{z}}$, one number per neuron. The layer then needs three things, each a direct reading of the picture:
+
+$$
+\frac{\partial L}{\partial W} = \boldsymbol{\delta}\,\mathbf{x}^{\top}, \qquad
+\frac{\partial L}{\partial \mathbf{b}} = \boldsymbol{\delta}, \qquad
+\frac{\partial L}{\partial \mathbf{x}} = W^{\top}\boldsymbol{\delta}.
+$$
+
+- **Weight gradients.** Entry $(j, i)$ of $\boldsymbol{\delta}\mathbf{x}^{\top}$ is $\delta_j x_i$: the signal at the weight's output end times the value at its input end. A weight carrying a large input into a neuron the loss cares about gets a large gradient. A weight whose input was zero gets none.
+- **The signal passed down.** $W^{\top}\boldsymbol{\delta}$ sends each neuron's signal back along the same weights it used going forward. The layer below then multiplies by its activation's local slope, $\mathrm{ReLU}'(\mathbf{z})$, which is 1 or 0. Where a neuron was off, the signal stops.
+
+The signal has to start somewhere. For the usual classifier or language model loss, softmax followed by cross-entropy (from <LessonLink id="probability" />), the signal at the logits comes out remarkably simple: $\boldsymbol{\delta} = \mathbf{p} - \mathbf{t}$, predicted probabilities minus the one-hot true answer. The model is pushed up on the right answer by $1 - p$ and down on every wrong answer by exactly its probability.
+
+## Why it costs about twice the forward pass
+
+Count the work per layer. Forward was one matrix multiply, $W\mathbf{x}$. Backward is two of the same size: $\boldsymbol{\delta}\mathbf{x}^{\top}$ for the weight gradients and $W^{\top}\boldsymbol{\delta}$ for the signal passed down. So the backward pass costs about twice the forward pass, and a full training step costs about three:
+
+$$
+\text{training FLOPs} \approx \underbrace{2N}_{\text{forward}} + \underbrace{4N}_{\text{backward}} = 6N \text{ per token, for } N \text{ parameters.}
+$$
+
+This **6ND rule** (for $D$ training tokens) is how compute budgets in papers and news are estimated. Compare the naive alternative: nudge each parameter and rerun the network. For a 7-billion-parameter model that is 7 billion forward passes for one step, against about three forward-pass equivalents. Reusing the downstream sensitivities is the difference between impossible and routine.
+
+The price is **memory**. The weight gradients need the stored forward values ($\mathbf{x}$ in $\boldsymbol{\delta}\mathbf{x}^{\top}$) and the ReLU slopes need the stored $\mathbf{z}$. So training must keep every layer's activations for every example in the batch until the backward pass reaches them. Inference can discard them as soon as the next layer has read them. This is why training needs far more memory than running the same model, a theme of <LessonLink id="memory-wall" />. A common trade is **activation checkpointing**: store only some layers' values and recompute the rest during the backward pass, spending extra compute to save memory.
+
+Nobody writes this by hand any more. Frameworks such as PyTorch and JAX record the graph as your code runs and apply each operation's local derivative in reverse. This is <Term id="autodiff">automatic differentiation</Term>.
+
+## Vanishing and exploding gradients
+
+The chain rule multiplies. On its way back through $k$ layers, the signal is multiplied by $k$ local factors: roughly, the weights' scale times the activation's slope, per layer. If those factors are consistently below 1, the signal shrinks geometrically; if above 1, it grows geometrically.
+
+<Figure
+  name="vanishing-gradients"
+  interactive
+  title="A product of many factors vanishes or explodes"
+  caption="If the backward signal is multiplied by about the same factor at every layer, the gradient reaching layer k of an N-layer network is that factor raised to the power N − k. Bars show each layer's gradient relative to the output layer, on a log scale."
+  notice="Nudge the factor from 1.0 to 0.9 with 50 layers. A 10% change per layer shrinks the first layer’s gradient about 175-fold. Depth turns small imbalances into huge ones."
+/>
+
+With a factor of 0.8 per layer, 30 layers shrink the signal to $0.8^{30} \approx 0.0012$ of its size: <Term id="vanishing-gradients">vanishing gradients</Term>. The early layers get almost no gradient and barely learn, while the late layers learn normally. With 1.2 per layer, the signal grows to $1.2^{30} \approx 237$ times its size: <Term id="exploding-gradients">exploding gradients</Term>, and steps become so large that training diverges. On the loss landscape, the slope along early layers' axes is either almost flat or absurdly steep.
+
+This is why deep networks were hard to train for decades. The sigmoid's slope is at most 0.25, so ten sigmoid layers can shrink the signal by $0.25^{10} \approx 10^{-6}$. The fixes all aim to keep each layer's factor near 1:
+- **ReLU-like activations**, whose slope is exactly 1 wherever the neuron is on.
+- **Careful initialisation**, scaling random starting weights so that signals neither grow nor shrink on average.
+- **Normalisation layers**, which rescale activations inside the network to a stable size.
+- **Residual connections**, which add each block's input to its output so the signal has a path with factor exactly 1. <Preview id="transformer">Every transformer block is built this way</Preview>.
+- **<Term id="gradient-clipping">Gradient clipping</Term>** for the rare explosion: if the gradient vector is longer than a threshold, scale it down before stepping.
+
+## Reason with it
+
+**Why does training a model need several times the memory of running it?** The backward pass needs, for each layer, the values that flowed through it going forward: the weight gradient is signal times stored input. So every activation of every example in the batch must be kept until the backward sweep returns to it. On top of that, training stores a gradient for every parameter and the optimiser's running averages. Inference keeps only the weights and a little working space (plus the KV cache for language models). Checkpointing exists precisely because activations, not weights, often fill a training GPU.
+
+**If you fine-tune only the last few layers and freeze the rest, why is each step much cheaper?** The backward sweep can stop at the lowest trainable layer: no signal needs to go further down, and frozen layers need no weight gradients. Most of the backward pass and its memory disappear, while the forward pass still runs in full.
+
+**Why did deep sigmoid networks struggle when ReLU networks of the same depth trained?** The signal is multiplied by the activation's slope at every layer. A sigmoid's slope is at most 0.25, and far less when saturated, so a few layers shrink the signal to nothing. A ReLU's slope is 1 wherever it is on. The price: a neuron that is off for every input passes nothing back and stops learning for good.
+
+## Where this picture breaks
+
+- **The gradient is local.** Backprop gives the exact slope at the current point, for the current mini-batch. It says nothing about the landscape a large step away. That is still gradient descent's problem, as the learning-rate discussion showed.
+- **Real graphs are not neat chains.** Attention, residual branches and shared weights create graphs where values feed many places. The rule "sensitivities add where paths merge" handles all of it, but the tidy layer-by-layer picture becomes a web.
+- **"Twice the forward pass" is a rule of thumb.** It holds for the matrix multiplies that dominate large models. Attention over long sequences, recomputation from checkpointing and communication between GPUs all add to it. Splitting this work across thousands of chips is the subject of <LessonLink id="distributed-training" />.
+- **It is not how brains learn.** Despite the name "neuron", there is no evidence that biological neurons send exact error signals backwards along the same connections. Backprop is an engineering algorithm, not a model of the brain.
+
+## Why it matters in the feed
+
+When a lab reports training a model with $N$ parameters on $D$ tokens, $6ND$ FLOPs is the compute bill, which links the announcement to GPU-hours and cost. When a training report mentions "loss spikes" and gradient clipping, exploding gradients are being contained. And a new normalisation or residual scheme is usually answering this lesson's question: how to keep the backward signal a healthy size across hundreds of layers.
+
+## Recap
+
+- Gradient descent needs the slope along every parameter's axis. Backpropagation gets all of them in one backward sweep over the computational graph.
+- It is the chain rule from the derivatives lesson run from the loss backwards, reusing each downstream sensitivity. Where paths merge, sensitivities add.
+- For a layer of the forward pass, $\tfrac{\partial L}{\partial W} = \boldsymbol{\delta}\mathbf{x}^{\top}$ (signal × stored input) and the signal passed down is $W^{\top}\boldsymbol{\delta}$, gated by the activation's slope.
+- Backward costs about 2× forward, so training costs about $6N$ FLOPs per token, and it must store activations, which is why training needs far more memory than inference.
+- Because the signal is a product of per-layer factors, deep networks need designs that keep each factor near 1, or gradients vanish or explode.

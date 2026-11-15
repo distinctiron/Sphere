@@ -1,26 +1,27 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { scoreNovelty } from "@/lib/llm";
+import { scoreNovelty, type LLMUsage } from "@/lib/llm";
+import { getSessionUserId } from "@/lib/news/session";
+import { aiAccessDenied, authorizeAiUsage } from "@/lib/billing/account";
+import { recordUsage } from "@/lib/billing/usage";
 
 export const runtime = "nodejs";
 
 /**
  * POST /api/papers/[id]/score
- * Score a paper for novelty
+ * Score a paper for novelty (fallback for papers the background job hasn't scored yet).
+ *
+ * Billing: requires a paid plan, but the cost is recorded as platform cost
+ * rather than charged, because the score is stored for every user.
  */
 export async function POST(
   request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    // Check authentication
-    const session = await auth();
-    if (!session?.user?.email) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
+    const userId = await getSessionUserId();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Get paper from database
@@ -36,6 +37,7 @@ export async function POST(
     }
 
     // Check if already scored (optional - can allow re-scoring)
+    // If already scored, no model call is needed
     if (paper.noveltyScore !== null) {
       return NextResponse.json(
         {
@@ -47,6 +49,9 @@ export async function POST(
       );
     }
 
+    const access = await authorizeAiUsage(userId);
+    if (!access.allowed) return aiAccessDenied(access);
+
     // Extract data for scoring
     const authors = Array.isArray(paper.authors)
       ? (paper.authors as Array<{ name: string }>)
@@ -57,14 +62,11 @@ export async function POST(
 
     // Score paper using LLM
     let scoreResult;
+    let usage: LLMUsage | undefined;
     try {
-      scoreResult = await scoreNovelty(
-        paper.title,
-        paper.abstract,
-        authors,
-        categories
-      );
+      scoreResult = await scoreNovelty(paper.title, paper.abstract, authors, categories, (u) => (usage = u));
     } catch (error) {
+      await recordUsage({ feature: "novelty-score", billing: "PLATFORM", usage, paperId: paper.id });
       console.error("Error scoring paper:", error);
       // Graceful degradation - return error but don't crash
       return NextResponse.json(
@@ -75,6 +77,8 @@ export async function POST(
         { status: 503 }
       );
     }
+
+    await recordUsage({ feature: "novelty-score", billing: "PLATFORM", usage, paperId: paper.id });
 
     // Update paper with novelty score
     const updatedPaper = await db.paper.update({

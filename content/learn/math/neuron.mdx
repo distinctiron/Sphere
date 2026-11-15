@@ -1,0 +1,176 @@
+---
+id: neuron
+title: The neuron
+summary: A neuron measures how far an input reaches along one direction, compares that with a threshold, and bends the result. Geometrically it is one straight cut through space, which explains both what it can learn and what it never can.
+minutes: 10
+model: meaning-is-geometry
+buildsOn: [vectors]
+related: [probability, derivatives, forward-pass]
+keywords: ["artificial neuron", "perceptron", "activation function", "ReLU", "sigmoid", "decision boundary", "weights and biases", "linear classifier", "logistic regression"]
+quiz:
+  - question: You multiply a sigmoid neuron's weights and its bias by 2. What happens to its decision boundary and its outputs?
+    options:
+      - The boundary moves twice as far from the origin
+      - The boundary stays exactly where it is, but outputs change more sharply from near 0 to near 1 as you cross it
+      - The boundary rotates by 90 degrees
+      - Nothing changes at all, because the ratio of weights to bias is the same
+    answer: 1
+    explanation: The boundary is where w·x + b = 0, and doubling both sides of an equation that equals zero leaves the same set of points. But every z doubles, so a point 1 unit of z past the boundary is now 2 units past it, and the sigmoid saturates sooner. The direction and offset of the cut are unchanged; only its sharpness grows with |w|.
+  - question: A neuron has weights w = (1, 0) and bias b = −2 and uses ReLU. For which inputs is its output above zero?
+    options:
+      - Every input with x₁ greater than 2, whatever x₂ is
+      - Every input with x₁ + x₂ greater than 2
+      - Every input more than 2 units from the origin
+      - Only the input (2, 0)
+    answer: 0
+    explanation: z = 1·x₁ + 0·x₂ − 2, so z is positive exactly when x₁ > 2. The weight on x₂ is zero, so the neuron is blind to that direction; its boundary is the vertical line x₁ = 2, perpendicular to w = (1, 0).
+  - question: Why can no single neuron, whatever its weights, bias or activation, output "yes" for the XOR corners (1, 1) and (−1, −1) and "no" for (1, −1) and (−1, 1)?
+    options:
+      - It needs more training time
+      - Sigmoid can't do it, but ReLU can
+      - Its yes/no decision is the sign of w·x + b, which splits the plane with one straight line, and no straight line puts two opposite corners on one side and the other two on the other
+      - The bias is limited to small values
+    answer: 2
+    explanation: The activation only reshapes values along the w direction; it cannot change which side of the line z = 0 a point is on. So every single neuron's decision is a straight cut. The midpoint of each diagonal is the origin, so any line with both "yes" corners on one side must also have at least one "no" corner there. Solving it needs a second layer, which is what the forward-pass lesson builds.
+  - question: A sigmoid neuron outputs exactly 0.5 for some input. Using the softmax picture from the probability lesson, what does that tell you?
+    options:
+      - The input is far from the boundary
+      - The input lies exactly on the decision boundary, where z = 0 and the two classes' scores are equal
+      - The neuron is broken
+      - The input has length 0.5
+    answer: 1
+    explanation: The sigmoid is a softmax over two logits, z for "yes" and 0 for "no". Equal logits give equal probabilities, 0.5 each, and that happens exactly when z = w·x + b = 0, which is the boundary line. Moving the input along w raises z and pushes the probability towards 1.
+---
+
+Every one of the billions of numbers in a language model sits inside a small unit that does one simple thing, over and over. The **<Term id="neuron">neuron</Term>** is the smallest part of a network that makes a decision. Understand exactly what one neuron computes and you know what a network is built from, what a "parameter" is, and why one neuron alone cannot learn even very simple patterns.
+
+This lesson answers: what does a neuron do *geometrically*, and what are the limits that follow from that?
+
+## The picture
+
+Start from the path's mental model: inputs are points in a space, and meaning lives in directions.
+
+<Recall id="vectors">
+
+A vector is a point and an arrow at once. The dot product $\mathbf{a} \cdot \mathbf{b} = \|\mathbf{a}\|\,\|\mathbf{b}\| \cos\theta$ measures alignment: it is the length of $\mathbf{a}$'s shadow on $\mathbf{b}$'s direction, times the length of $\mathbf{b}$. It is positive when the arrows point the same way, zero when they are perpendicular and negative when they oppose.
+
+</Recall>
+
+A neuron owns one direction, its **weight vector** $\mathbf{w}$. Given an input point $\mathbf{x}$, it does three things:
+
+1. **Measure.** It takes the dot product $\mathbf{w} \cdot \mathbf{x}$: how far the input reaches along the neuron's direction.
+2. **Compare.** It adds a <Term id="bias">bias</Term> $b$, which acts as a threshold that the measurement has to beat.
+3. **Bend.** It passes the result through an <Term id="activation-function">activation function</Term>, which decides how the output responds on either side of the threshold.
+
+Every input that scores exactly zero lies on one straight line, **perpendicular to** $\mathbf{w}$. That line is the neuron's <Term id="decision-boundary">decision boundary</Term>. On one side the neuron says "more of my direction than the threshold", on the other "less". So a single neuron is **one straight cut through input space**, plus a graded response that grows the further an input sits past the cut.
+
+<Figure
+  name="neuron-boundary"
+  interactive
+  title="One neuron is one straight cut, at right angles to its weights"
+  caption="Drag the tip of w, or use the sliders. The black line is where w·x + b = 0; rose shading is the neuron's output. Dashed lines mark z = ±1 and ±2. Points with an amber ring are on the wrong side."
+  notice="However you turn w, the boundary stays at right angles to it. The bias slides the boundary along w without turning it, and |w| only changes how quickly the output ramps up. Then switch to the XOR corners: no setting gets every point right."
+/>
+
+<KeyIdea>
+
+A neuron is a **direction detector with a threshold**. Its weight vector says which direction in input space it listens for, its bias says how much of that direction is enough, and its activation bends the answer. Everything it can represent is a single flat cut through space.
+
+</KeyIdea>
+
+## The weighted sum is a measurement along one direction
+
+Written out, the neuron computes
+
+$$
+z = \mathbf{w} \cdot \mathbf{x} + b = w_1 x_1 + w_2 x_2 + \dots + w_n x_n + b, \qquad a = f(z).
+$$
+
+Each <Term id="weights">weight</Term> $w_i$ says how much input $i$ counts: positive weights are evidence *for*, negative weights are evidence *against*, and a zero weight means the neuron ignores that input entirely. Read with the picture, the same sum says something cleaner: $\mathbf{w} \cdot \mathbf{x}$ is the length of $\mathbf{x}$'s shadow on the direction of $\mathbf{w}$, scaled by $\|\mathbf{w}\|$. The neuron's view of the world is that single number.
+
+Three consequences follow straight from the geometry.
+
+- **The direction of $\mathbf{w}$ chooses what is detected.** Rotating $\mathbf{w}$ rotates the boundary with it.
+- **The bias moves the cut without turning it.** The boundary sits where the shadow equals $-b / \|\mathbf{w}\|$, so changing $b$ slides it along $\mathbf{w}$. Without a bias, every boundary would have to pass through the origin.
+- **The length $\|\mathbf{w}\|$ sets the sharpness.** Points with equal $z$ form lines parallel to the boundary, spaced $1/\|\mathbf{w}\|$ apart, and a point's distance from the boundary is $z / \|\mathbf{w}\|$. A longer $\mathbf{w}$ packs those lines closer, so $z$ changes faster as you cross.
+
+In $n$ dimensions nothing changes except the name. The boundary is a flat $(n-1)$-dimensional slice called a hyperplane. A neuron reading a 4,096-dimensional hidden state cuts that space with a 4,095-dimensional flat sheet.
+
+<Example title="a two-input neuron">
+
+Take $\mathbf{w} = (2, 1)$ and $b = -1$, so $z = 2x_1 + x_2 - 1$ and $\|\mathbf{w}\| = \sqrt{5} \approx 2.24$.
+
+| input $\mathbf{x}$ | $z$ | ReLU output | sigmoid output |
+|---|---|---|---|
+| $(1, 1)$ | $2$ | $2$ | $0.88$ |
+| $(0.5, 0)$ | $0$ | $0$ | $0.50$ |
+| $(0, 0)$ | $-1$ | $0$ | $0.27$ |
+
+The input $(0.5, 0)$ lies exactly on the boundary. The input $(1, 1)$ is $2 / 2.24 \approx 0.89$ units past it on the "yes" side.
+
+Now double everything: $\mathbf{w} = (4, 2)$, $b = -2$. The boundary is the same line, since $4x_1 + 2x_2 - 2 = 0$ is the same equation. But $(1, 1)$ now scores $z = 4$ and the sigmoid gives $0.98$ instead of $0.88$: the same cut, a sharper response.
+
+</Example>
+
+## The activation bends the answer
+
+If a neuron stopped at $z$, it would be linear, and <Preview id="forward-pass">stacking linear neurons gains nothing</Preview>. The activation $f$ is where the bend comes from. Two are worth knowing well.
+
+**<Term id="relu">ReLU</Term>**, $\max(0, z)$, is silent on one side of the boundary and grows in a straight ramp on the other. In the figure its shading is flat white on one side and deepens steadily on the other. Geometrically it **creases** space along the boundary. It is cheap, and because the ramp never flattens out, it keeps responding to how far past the threshold an input is.
+
+**<Term id="sigmoid">Sigmoid</Term>**, $\sigma(z) = 1 / (1 + e^{-z})$, squashes every $z$ into the range 0 to 1, crossing 0.5 exactly on the boundary.
+
+<Recall id="probability">
+
+Softmax turns a vector of logits into probabilities: exponentiate each score and normalise. Only the differences between the logits matter.
+
+</Recall>
+
+The sigmoid is softmax with two classes. Give "yes" the logit $z$ and "no" the logit $0$; softmax then gives "yes" the probability $e^z / (e^z + 1) = \sigma(z)$. So a sigmoid neuron is a complete probabilistic classifier, known in statistics as logistic regression. Its answer is "the probability of yes", and that probability depends only on how far past the cut the input sits, measured in units of $1/\|\mathbf{w}\|$.
+
+Modern language models mostly use smooth relatives of ReLU such as GELU. They bend rather than crease, but the picture is the same.
+
+A neuron with $n$ inputs has $n + 1$ learnable numbers: $n$ weights and one bias. These are its <Term id="parameters">parameters</Term>. When a model is described as having 70 billion parameters, almost all of them are weights inside neurons like this one, arranged in layers.
+
+## What one neuron can and cannot separate
+
+Because the decision is the sign of $z$, and $z = 0$ is a flat cut, a single neuron can only separate classes that some straight line (hyperplane) splits cleanly. In the figure's "two clusters" data you can rotate $\mathbf{w}$ towards the rose cluster, slide the bias, and get every point right.
+
+Now switch to the XOR corners: rose at $(1, 1)$ and $(-1, -1)$, blue at $(1, -1)$ and $(-1, 1)$. Try any direction and any bias. The best any line manages is three corners out of four. The reason is visible: both diagonals cross at the origin, so a line that puts both rose corners on its "yes" side must let at least one blue corner in too. Changing the activation does not help. The activation reshapes values *along* $\mathbf{w}$, but it cannot change which side of the line a point is on.
+
+This limit is historical as well as geometric. Minsky and Papert's 1969 book analysed the limits of single-layer perceptrons, including exactly this kind of point, and is widely credited with helping to cool interest in neural networks for years (historians still debate how much it was the cause). The way out is more neurons whose outputs feed further neurons, which is the next lesson.
+
+<Caution>
+
+A bigger or longer weight vector never helps with XOR. Scaling $\mathbf{w}$ and $b$ makes the response sharper but leaves the boundary in place. The limit is the *shape* of the boundary (one straight cut), not its steepness.
+
+</Caution>
+
+## Reason with it
+
+**A neuron reads a 4,096-dimensional input. How much of the input can it actually tell apart?** Exactly one direction's worth. The neuron sees only $\mathbf{w} \cdot \mathbf{x}$, so two inputs that differ only in directions perpendicular to $\mathbf{w}$ produce the same output. It is blind to 4,095 of the 4,096 directions. That is why layers need many neurons: to keep the information that matters, a layer needs enough different directions to cover it. It is also why each neuron in a trained layer ends up specialised: it can only ever report on one direction.
+
+**What happens if one input feature is measured in the thousands while the others are around 1?** That feature dominates the dot product. Most inputs land far from the boundary, where a sigmoid is pinned near 0 or 1 and barely responds to small changes in $\mathbf{w}$ or $b$. Training relies on small changes having visible effects (in the language of <LessonLink id="derivatives" />, on non-zero slopes), so learning stalls. This is why inputs and hidden activations are routinely normalised to similar scales.
+
+**Why can a ReLU neuron "die"?** If its bias and weights drift so that every training input falls on the silent side of its boundary, its output is 0 for all of them. Small changes to $\mathbf{w}$ or $b$ then leave every output at 0, so there is nothing to tell training which way to move it, and it stays silent for good. Variants such as leaky ReLU or GELU, which let a little signal through on the silent side, reduce this.
+
+## Where this picture breaks
+
+- **It is not a model of a brain cell.** The name is historical. Biological neurons fire in spikes over time, compute within their branches and adapt chemically. The only shared structure is "many inputs, weighted, combined into one output". Nothing in this lesson depends on biology, and reasoning from biology to networks is unreliable.
+- **Single neurons are rarely the unit of meaning.** In large models, one neuron often responds to several unrelated things, and one concept is usually spread across many neurons. In the vectors lesson's picture, concepts are *directions* in a layer's space, and a neuron is just one particular direction, the one along its own weight vector. Nothing forces concepts to line up with it.
+- **Two dimensions understate the room.** In the figure a straight cut looks crude. In thousands of dimensions, a single hyperplane can separate a surprising amount, which is why linear "probes" on a model's hidden states work as well as they do.
+- **Some modern blocks multiply rather than threshold.** Gated units such as SwiGLU multiply two different projections of the input together. That is not a single cut on a single direction, although the building blocks are still dot products.
+
+How the weights of a neuron get chosen is not part of this picture at all: we set them by hand. Real networks start with random weights and adjust them by <Preview id="gradient-descent">walking downhill on a loss landscape</Preview>.
+
+## Why it matters in the feed
+
+Parameter counts in model announcements are, almost entirely, counts of the weights inside neurons like this one. Interpretability research is where the "which direction does it detect" question gets asked for real. Early work looked for single neurons that fire for one concept. More recent work, for example with sparse autoencoders, looks for *directions* built from many neurons, because single neurons turned out to mix concepts. When you read that researchers "found a feature" for deception or for a particular city inside a model, it is a direction in some layer's space, measured with a dot product, exactly as a neuron would measure it.
+
+## Recap
+
+- A neuron computes $z = \mathbf{w} \cdot \mathbf{x} + b$ and outputs $f(z)$. The dot product from the vectors lesson measures how far the input reaches along the neuron's own direction $\mathbf{w}$.
+- The decision boundary $z = 0$ is a straight line (a hyperplane in general) perpendicular to $\mathbf{w}$. The bias slides it; $\|\mathbf{w}\|$ sets how sharply the output changes across it.
+- ReLU creases space along the boundary. Sigmoid turns $z$ into a probability, and is the two-class softmax from the probability lesson.
+- The weights and biases are the model's parameters: $n + 1$ per neuron with $n$ inputs.
+- One neuron is one straight cut, so it cannot solve XOR or anything else that needs a bent boundary. Stacking neurons into layers is what removes that limit.

@@ -20,7 +20,7 @@ interface ArxivEntry {
   links: Array<{ rel: string; type?: string; href: string }>;
 }
 
-interface ParsedPaper {
+export interface ParsedPaper {
   arxivId: string;
   title: string;
   authors: Array<{ name: string }>;
@@ -136,14 +136,93 @@ function convertToParsedPaper(entry: ArxivEntry): ParsedPaper {
 }
 
 /**
- * Format date for arXiv API query
- * Format: YYYYMMDD
+ * Format a date for arXiv submittedDate range queries.
+ * Format: YYYYMMDDHHMM in GMT (e.g. 202609281530)
  */
-function formatDateForQuery(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}${month}${day}`;
+export function formatArxivDateTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
+    `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`
+  );
+}
+
+/**
+ * Build a search query for papers in the given categories submitted within a window.
+ * Example: (cat:cs.* OR cat:physics.*) AND submittedDate:[202609240000 TO 202609281200]
+ */
+export function buildSubmittedDateQuery(categories: string[], from: Date, to: Date): string {
+  const categoryClause = categories.map((c) => `cat:${c}`).join(" OR ");
+  return `(${categoryClause}) AND submittedDate:[${formatArxivDateTime(from)} TO ${formatArxivDateTime(to)}]`;
+}
+
+export class ArxivApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+    this.name = "ArxivApiError";
+  }
+}
+
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+/**
+ * Search the arXiv API (one page of results).
+ * Retries rate-limit and server errors with backoff (honouring Retry-After).
+ */
+export async function searchArxiv(options: {
+  searchQuery: string;
+  start?: number;
+  maxResults?: number;
+  signal?: AbortSignal;
+}): Promise<{ papers: ParsedPaper[]; totalResults: number }> {
+  const params = new URLSearchParams({
+    search_query: options.searchQuery,
+    start: String(options.start ?? 0),
+    max_results: String(options.maxResults ?? 100),
+    sortBy: "submittedDate",
+    sortOrder: "descending",
+  });
+  const url = `${ARXIV_API_BASE}?${params.toString()}`;
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": "Sphere/1.0 (Research Companion)" },
+        signal: options.signal,
+      });
+
+      if (!response.ok) {
+        throw new ArxivApiError(
+          `arXiv API returned status ${response.status}: ${response.statusText}`,
+          response.status
+        );
+      }
+
+      const xmlString = await response.text();
+      const totalMatch = xmlString.match(/<opensearch:totalResults[^>]*>(\d+)<\/opensearch:totalResults>/);
+
+      const papers: ParsedPaper[] = [];
+      for (const entry of parseXmlResponse(xmlString)) {
+        try {
+          papers.push(convertToParsedPaper(entry));
+        } catch (error) {
+          console.error(`Error parsing paper entry:`, error);
+          // Continue processing other papers even if one fails
+        }
+      }
+
+      return { papers, totalResults: totalMatch ? parseInt(totalMatch[1], 10) : papers.length };
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        error instanceof ArxivApiError ? RETRYABLE_STATUSES.has(error.status) : !options.signal?.aborted;
+      if (!retryable || attempt === MAX_ATTEMPTS) break;
+      await new Promise((resolve) => setTimeout(resolve, 3000 * 2 ** (attempt - 1)));
+    }
+  }
+  throw lastError;
 }
 
 /**
@@ -161,51 +240,10 @@ export async function fetchPapersFromArxiv(
   categoryFilter: string = "cat:*"
 ): Promise<ParsedPaper[]> {
   try {
-    // Build query parameters
-    // Note: Date filtering with submittedDate queries causes 500 errors from arXiv API
-    // For now, fetch recent papers sorted by submission date
-    // Client can filter by date after fetching if needed
-    const params = new URLSearchParams({
-      search_query: categoryFilter,
-      start: "0",
-      max_results: String(maxResults),
-      sortBy: "submittedDate",
-      sortOrder: "descending",
-    });
-
-    const url = `${ARXIV_API_BASE}?${params.toString()}`;
-
-    // Fetch from arXiv API
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Sphere/1.0 (Research Companion)",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`arXiv API returned status ${response.status}: ${response.statusText}`);
-    }
-
-    const xmlString = await response.text();
-
-    // Parse XML response
-    const entries = parseXmlResponse(xmlString);
-
-    // Convert to ParsedPaper format
-    const papers: ParsedPaper[] = [];
-    for (const entry of entries) {
-      try {
-        papers.push(convertToParsedPaper(entry));
-      } catch (error) {
-        console.error(`Error parsing paper entry:`, error);
-        // Continue processing other papers even if one fails
-      }
-    }
-
+    const { papers } = await searchArxiv({ searchQuery: categoryFilter, maxResults });
     return papers;
   } catch (error) {
     console.error("Error fetching papers from arXiv:", error);
     throw error;
   }
 }
-

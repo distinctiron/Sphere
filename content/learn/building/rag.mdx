@@ -1,0 +1,167 @@
+---
+id: rag
+title: Retrieval-augmented generation
+summary: How a model answers from documents it was never trained on. Split them into chunks, embed each chunk as a vector, retrieve the chunks that point the same way as the question, and put them into the context to be cited. An answer can be no better than what was retrieved.
+minutes: 12
+model: context-machine
+buildsOn: [embeddings, context-engineering]
+related: [model-api, tool-use, agent-loop, evals, agent-security]
+keywords: ["RAG", "retrieval-augmented generation", "vector database", "vector search", "semantic search", "hybrid search", "reranking", "chunking", "grounding", "citations"]
+quiz:
+  - question: A user asks a paper-chat assistant “What learning rate is in Table 2?”. Vector search returns general results passages, but not the one containing Table 2. Which change is most likely to fix this kind of miss?
+    options:
+      - Use a larger chat model
+      - Add keyword matching (hybrid search), so a passage containing the exact string “Table 2” scores highly even if its vector points elsewhere
+      - Raise k from 4 to 40
+      - Lower the temperature
+    answer: 1
+    explanation: Embeddings capture what a passage is about, not its exact strings; “Table 2” and “Table 3” point almost the same way. Keyword scoring rewards exact identifiers, names and numbers. Raising k mostly adds near-miss passages that compete for attention.
+  - question: A team switches to a new embedding model for questions but keeps the stored vectors made by the old model. What happens to retrieval?
+    options:
+      - It gets slightly better, because the new model is better
+      - Nothing changes, since both models embed the same text
+      - Only long questions are affected
+      - It breaks, because the two models define different vector spaces, so cosine similarity between their vectors is meaningless; every chunk must be re-embedded
+    answer: 3
+    explanation: An embedding model defines its own coordinate system; its axes mean nothing to another model. Comparing directions across two systems is like comparing map coordinates from two different projections. This is why Sphere records the model name with every stored vector and re-embeds when it changes.
+  - question: Someone indexes each paper as a single chunk, one vector per paper. What goes wrong?
+    options:
+      - One vector must represent every topic in the paper, so it points at none of them sharply; specific questions match weakly, and a hit puts the whole paper into the context, so nothing is saved
+      - Nothing; fewer chunks is always better
+      - The embedding model refuses long inputs, so the paper is skipped
+      - Retrieval becomes too precise
+    answer: 0
+    explanation: An embedding of a long, many-topic text is a kind of average direction. Chunking gives each topic its own direction to be found by, and it makes the unit of retrieval small enough that the context stays a budget, not a dump.
+  - question: A 20-turn chat about one 16,000-token paper can either send the whole paper on every turn, or retrieve 4 chunks of 800 tokens per turn. Using the model API lesson, how many paper tokens does each approach send over the conversation?
+    options:
+      - 16,000 versus 3,200
+      - 320,000 versus 3,200
+      - 320,000 versus 64,000
+      - The same, because the model remembers the paper after the first turn
+    answer: 2
+    explanation: The model keeps nothing between calls, so whatever context a turn needs is sent on that turn. 20 × 16,000 = 320,000 tokens versus 20 × 3,200 = 64,000. Prompt caching narrows the gap for a fixed prefix, but retrieval also keeps each context short and focused.
+---
+
+A model knows what was in its training data, frozen at some cutoff date. It knows nothing about your company's documents, your notes, or the arXiv paper posted this morning. Retraining it on every new document is slow and expensive, it is unreliable at adding specific facts, and it cannot tell you where an answer came from.
+
+**Retrieval-augmented generation** (<Term id="rag">RAG</Term>) takes the other route: look up the relevant passages, put them in front of the model, and ask it to answer from them and cite them. Sphere's paper chat is a RAG system, and we will use it as the running example. Every design decision in it follows from two pictures you already have: context as a budget, and meaning as direction.
+
+## The picture
+
+In this path's picture, the harness decides what goes into the context. RAG is that decision made **per question, by geometry**. Before any question arrives, the harness splits the documents into chunks and records each chunk as an <Term id="embedding">embedding</Term>: a vector, a direction in meaning-space. When a question arrives, it finds the chunks whose directions are closest to the question's, and writes just those into the context.
+
+<Figure
+  name="rag-pipeline"
+  title="Index once, retrieve per question"
+  caption="Top: each paper is split into chunks, each chunk is embedded as a vector, and the vectors are stored. Bottom: the question is embedded the same way, the stored vectors pointing most nearly the same way are retrieved, and those passages go into the context as numbered sources that the answer cites."
+  notice="The model appears only at the very end. Everything before it is ordinary code deciding what the model will get to read."
+/>
+
+<KeyIdea>
+
+RAG turns "what does the model know?" into "**what did the harness put in front of it?**". The model reads and writes; retrieval chooses what it reads. So an answer can be no better than the passages retrieved, and most RAG failures are retrieval failures.
+
+</KeyIdea>
+
+## Chunk, embed, store
+
+<Recall id="embeddings">
+
+An embedding model turns a piece of text into a vector. Texts with similar meaning point in similar directions, so the <Term id="cosine-similarity">cosine of the angle</Term> between two vectors (their normalised dot product) measures how related they are.
+
+</Recall>
+
+**Why chunk?** Two reasons, one from each picture.
+
+- **Geometry.** A single vector for a whole paper has to stand for every topic the paper covers, so it points sharply at none of them: it is a kind of average direction. Split the paper, and each topic gets its own vector that a specific question can line up with.
+- **Budget.** The unit of retrieval is the unit that enters the context. Retrieve a whole document and you are back to pasting everything in.
+
+<Term id="chunking">Chunking</Term> is a trade-off. Small chunks are precise but can lose the context that makes them meaningful ("it improves accuracy by 4 points": what is "it"?). Large chunks keep context but blur topics. Sphere's chunker splits each section of a paper into pieces of about 500 to 1,000 tokens, aiming for 800. It ends them on paragraph or sentence boundaries, never mixes two sections in one chunk, and overlaps each chunk with the end of the previous one by about 75 tokens, so a sentence cut at a boundary survives whole in one of them. For every chunk it records the section title and an anchor into the paper, so a citation can later jump to the exact spot.
+
+Each chunk is then embedded and stored with the **name of the embedding model** that produced it. That detail follows directly from the geometry: each embedding model defines its own coordinate system, so a vector from one model and a vector from another cannot be compared. When the model changes, Sphere re-embeds everything.
+
+Storage can be simple. A paper has tens of chunks, so Sphere compares the question with every chunk of that paper exactly; that takes well under a millisecond. At millions of chunks, exact comparison gets slow, and a <Term id="vector-database">vector database</Term> uses approximate nearest-neighbour indexes that trade a little accuracy for large speedups.
+
+## Retrieve, then generate
+
+When a question arrives, the harness embeds it with the same model, ranks chunks by cosine similarity, keeps the top $k$ that clear a minimum similarity, and writes them into the context as numbered passages, with instructions to answer from them and cite them.
+
+<Recall id="context-engineering">
+
+Every token in the window costs money and prefill time and competes for attention. Near-miss material is not neutral padding: it distracts. Long reference material belongs before the question, with clear structure and numbering.
+
+</Recall>
+
+That is why $k$ is small (Sphere's chat retrieves 4 passages), why there is a similarity threshold rather than "always send the top 4", and why passages arrive numbered and delimited. Around this core, a real system adds harness logic for the awkward cases:
+
+- **Follow-ups.** "Why?" carries almost no meaning on its own, so its vector points nowhere useful. For short follow-ups, Sphere appends the previous question to the retrieval query.
+- **Broad questions.** "Summarise this paper" is not *about* any one passage, so nothing clears the threshold. Sphere then falls back to overview passages: the abstract, conclusion and introduction.
+- **Citations.** The prompt says to cite a passage as [n] right after the claim it supports, and never to invent source numbers. The interface links each [n] back to the exact passage, so the reader can check the claim. That is <Term id="grounding">grounding</Term>: the answer is tied to evidence someone can inspect.
+
+<Figure
+  name="retrieval-geometry"
+  interactive
+  title="Retrieval is choosing directions"
+  caption="Passages of one paper as directions, and a question as a rose direction. The cone is the similarity threshold. Vector search returns the top k passages inside it; hybrid search also scores exact keyword matches; if nothing qualifies, the harness falls back to overview passages."
+  notice="Ask “What does Table 3 show?” with vector search only. The passage containing Table 3 points elsewhere, because its vector encodes what it is about (an ablation), not the string “Table 3”. Switch on hybrid search and it ranks first."
+/>
+
+<Example title="why not just paste the paper in?">
+
+A 12,000-word paper is about 16,000 tokens. Chunked at about 800 tokens, it becomes roughly 20 chunks, and a question retrieves 4 of them: about 3,200 tokens.
+
+Remember from the model API lesson that each call is sent its whole context. Over a 20-turn conversation, pasting the paper into every call sends $20 \times 16{,}000 = 320{,}000$ paper tokens; retrieval sends $20 \times 3{,}200 = 64{,}000$, a fifth as many. Prompt caching narrows that gap, because the pasted paper would be an identical prefix. The attention argument does not go away, though, and a library of 1,000 papers (16 million tokens) fits in no context window at all.
+
+</Example>
+
+## When retrieval fails
+
+Each failure has a place in the pipeline, which is what makes the picture useful for debugging.
+
+| Symptom | Where it breaks | Typical fix |
+|---|---|---|
+| Misses exact names, codes, "Table 3" | Embeddings encode topic, not strings | <Term id="hybrid-search">Hybrid search</Term>: add keyword scoring |
+| The answer is split across two chunks | Chunk boundaries | Overlap, structure-aware chunks, fetch neighbours |
+| Similar but wrong passages rank first | Cosine is "about the same thing", not "answers this" | A <Term id="reranker">reranker</Term> that scores question and passage together |
+| Follow-ups retrieve nonsense | The query lacks meaning on its own | Rewrite the query from the conversation |
+| Confident answer, no support | Nothing relevant exists | Threshold, and instructions to say so |
+
+Sphere's "explain this passage" feature uses a hybrid of its own. It boosts the chunk that literally contains the selected text, and that chunk's neighbours, on top of semantic similarity (65% similarity, 35% position). Knowing *where* the reader is looking is a signal no embedding captures.
+
+Retrieval also does not have to happen once, up front.
+
+<Recall id="tool-use">
+
+A model can write a structured request, a tool call, which the harness executes and whose result it appends to the context before calling the model again.
+
+</Recall>
+
+Give the model a `search` tool, and retrieval becomes something it does when it needs to: search, read, notice what is missing, search again with better words. Coding agents often skip vectors entirely and search files with exact text matching, because code is full of identifiers that keyword search finds perfectly.
+
+## Reason with it
+
+**Why does RAG reduce hallucination without eliminating it?** The passages strongly condition the answer, but the model is still generating, not copying. It can blend retrieved facts with what it absorbed in training, misread a table, or attach a citation to a claim the passage does not support. And if retrieval missed the right passage, the model may answer from the near misses it was given. Citations do not make answers true; they make them *checkable*, which is why the link from [n] to the passage matters.
+
+**With million-token windows, is RAG obsolete?** Weigh the budget. Pasting everything costs input tokens and prefill time on every call, dilutes attention, and still fails once the corpus outgrows the window. It also ignores permissions: which user may see which document is a retrieval-time decision. The picture predicts the split. For a small, stable, heavily reused corpus, putting it all in context (with prompt caching) can win. For large, changing or access-controlled corpora, retrieval wins. Sphere does both: retrieval normally, and the paper's full text, truncated, as a fallback when retrieval is unavailable.
+
+**Why can't two teams share a vector index if they use different embedding models?** Each model defines its own space; the same sentence lands at unrelated coordinates in each. Cosine similarity across spaces is meaningless, so an index is tied to the model that built it. Changing the model means re-embedding every chunk.
+
+## Where this picture breaks
+
+- **Similarity is not relevance.** Cosine measures "about the same thing". A passage can be on exactly the right topic and still not contain the answer, while the one that does is phrased differently. Rerankers and query rewriting exist to close that gap.
+- **The 2-D figure flatters retrieval.** In hundreds of dimensions, unrelated texts are nearly perpendicular and useful thresholds are far lower (Sphere's default is 0.25 with its embedding model). Thresholds must be tuned per model.
+- **Chunks lose their surroundings.** Some systems prepend a line of document and section context to each chunk before embedding it, so "it improves accuracy" carries what "it" is.
+- **Multi-step questions need planning.** "Compare this paper's result with the baseline it cites" needs several retrievals, where each depends on the last. That is retrieval inside <Preview id="agent-loop">an agent loop</Preview>.
+- **Retrieved text is untrusted.** A passage can contain instructions as easily as facts, and it enters the context with the same standing as everything else. That is the start of <Preview id="agent-security">agent security</Preview>.
+
+## Why it matters in the feed
+
+When a startup raises money for a vector database, or an enterprise announces "AI search over all your documents", it is selling the index-and-retrieve half of this lesson. When a paper reports a new retrieval method, look at which failure row it attacks. And when someone declares RAG dead because context windows grew, apply the budget argument above: a longer window changes where the crossover sits, not whether one exists.
+
+## Recap
+
+- RAG is the harness choosing, per question, which slices of a corpus enter the context. The model reads, and retrieval decides what.
+- Chunks are embedded so that each topic has its own direction; questions retrieve chunks by cosine similarity, which is the embeddings picture of similarity as direction.
+- Small $k$, a threshold, numbered passages and citations are context engineering applied to retrieved text: precision over volume, and checkable answers.
+- Failures sit at specific stages: exact strings (hybrid search), boundaries (overlap, neighbours), near misses (rerankers), vague queries (rewriting).
+- As a tool, retrieval becomes something the model does repeatedly inside a loop, which leads to agents.

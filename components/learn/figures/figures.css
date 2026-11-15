@@ -1,0 +1,50 @@
+/* Lesson figures (Epic 9). Per-figure keyframes live in each figure's own <style> block. */
+
+/* Paused (user, off-screen, or reduced motion): freeze CSS animations in place */
+.learn-figure.fig-paused *,
+.learn-figure.fig-paused *::before,
+.learn-figure.fig-paused *::after {
+  animation-play-state: paused !important;
+}
+
+/* Reduced motion: no animation until the reader explicitly presses play */
+@media (prefers-reduced-motion: reduce) {
+  .learn-figure:not(.fig-force-motion) *,
+  .learn-figure:not(.fig-force-motion) *::before,
+  .learn-figure:not(.fig-force-motion) *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* KaTeX display math can be wider than a phone: scroll it, not the page */
+.lesson-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+/* Tables inside callouts (which opt out of prose styles) */
+.lesson-prose .not-prose table {
+  width: 100%;
+  margin: 0.75rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.lesson-prose .not-prose th,
+.lesson-prose .not-prose td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px dashed rgba(34, 37, 46, 0.25);
+  text-align: left;
+  vertical-align: top;
+}
+.lesson-prose .not-prose th {
+  font-weight: 600;
+  color: #22252e;
+}
+.lesson-prose .not-prose ul { list-style: disc; padding-left: 1.25rem; }
+.lesson-prose .not-prose ol { list-style: decimal; padding-left: 1.25rem; }
+.lesson-prose .not-prose li { margin: 0.2rem 0; }
+
+/* Wide tables scroll inside the lesson instead of widening the page */
+.lesson-prose table { display: block; overflow-x: auto; }

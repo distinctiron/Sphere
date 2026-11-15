@@ -188,6 +188,7 @@ The analogy clicks. She highlights the section and adds a note: "Implement this 
 -   **FR1:** User can sign up and log in using an email and password.
 -   **FR2:** User can reset their password via email link.
 -   **FR3:** User can view their account profile details.
+-   **FR18:** User can sign up and log in using federated identity providers (Google, Apple, Facebook) to lower entry barrier and enable faster onboarding.
 
 ### Content Discovery (Impact Dashboard)
 -   **FR4:** User can view a dashboard of recommended papers sorted by "Novelty Score."
@@ -209,6 +210,20 @@ The analogy clicks. She highlights the section and adds a note: "Implement this 
 -   **FR16:** User can mark a paper as "Read" (archiving it from the active list).
 -   **FR17:** User can remove papers from the list.
 
+### Payment & Monetization (Post-MVP)
+-   **FR19:** System enforces a free tier that allows processing of 5 articles without payment.
+-   **FR20:** User can purchase pay-as-you-go credits to process additional articles beyond the free tier limit.
+-   **FR21:** User can subscribe to a monthly subscription plan for unlimited article processing.
+-   **FR22:** System integrates with Stripe for payment processing (both one-time payments and recurring subscriptions).
+-   **FR23:** System tracks and displays remaining article processing quota based on user's payment plan.
+-   **FR24:** System prevents article processing when user has exceeded their quota and prompts for payment upgrade.
+
+### Content Processing & Synchronization (Post-MVP)
+-   **FR25:** System processes articles from arXiv on a fixed hourly schedule for Computer Science and Physics categories.
+-   **FR26:** System automatically generates novelty scores and summaries for newly fetched papers during scheduled processing.
+-   **FR27:** When a user logs in, the application requests and displays the newest papers that have been pre-processed.
+-   **FR28:** System tracks last processing timestamp per user to identify new articles since last synchronization.
+
 ## Non-Functional Requirements
 
 ### Performance
@@ -222,3 +237,10 @@ The analogy clicks. She highlights the section and adds a note: "Implement this 
 ### Security
 -   **Data Protection:** User passwords must be hashed and salted.
 -   **Personal Data:** User notes and reading history must be stored securely and accessible only to the authenticated user.
+-   **Payment Security:** All payment transactions must be processed securely through Stripe with PCI compliance. No payment card data should be stored locally.
+
+### Architecture & Infrastructure (Post-MVP)
+-   **Centralized Database:** System maintains a single centralized database containing all papers to enable efficient caching and reduce duplicate processing.
+-   **LLM Caching:** System caches papers with the LLM provider to avoid redundant document uploads when multiple users query the same article, significantly reducing token usage and costs.
+-   **Token Optimization:** When users ask questions about an article, the system directs queries to an LLM session where the document is already cached, eliminating per-query document upload costs.
+-   **Cache Management:** System implements cache invalidation strategy to ensure document freshness while maximizing cache hit rates for cost efficiency.
